@@ -2,15 +2,11 @@ name: deploy-site
 
 # 把 site/ 部署成公開網站(GitHub Pages),並在部署前抓最新的價格資料。
 #
-# 第一次啟用: Settings → Pages → Build and deployment → Source 選「GitHub Actions」。
-# 之後 push 到 main(動到網站或抓資料的檔案)、每天一次、或在 Actions 頁面手動執行,都會重新部署。
+# 目前「只能手動執行」: 這個 repo 還沒有開啟 Pages(需要在 Settings → Pages → Source 選「GitHub Actions」,
+# 這一步沒有辦法由 Actions 自己完成),所以不讓 push 與排程自動觸發,免得每次都跑出紅燈。
+# 真的要公開部署時: 先開啟 Pages,再把下面的 on: 還原成 push + schedule(見 docs 的「部署」一節)。
 on:
   workflow_dispatch: {}
-  push:
-    branches: [main]
-    paths: ["site/**", "tools/fetch_prices.py", "tools/universe.json", ".github/workflows/pages.yml"]
-  schedule:
-    - cron: "15 23 * * *"     # 每天一次,美股、台股收盤後,加密貨幣也已有當日資料
 
 permissions:
   contents: read

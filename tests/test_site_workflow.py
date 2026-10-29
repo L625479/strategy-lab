@@ -6,11 +6,10 @@ import yaml
 WF = yaml.safe_load(Path(".github/workflows/pages.yml").read_text(encoding="utf-8"))
 
 
-def test_pages_workflow_triggers():
+def test_pages_workflow_is_manual_only_until_pages_is_enabled():
     triggers = WF.get("on", WF.get(True))
-    assert {"workflow_dispatch", "push", "schedule"} <= set(triggers)
-    assert triggers["push"]["branches"] == ["main"] and any(p.startswith("site/") for p in triggers["push"]["paths"])
-    assert "if" not in WF["jobs"]["deploy"]                          # 公開 repo: 不需要啟用開關,push 與排程都會部署
+    assert list(triggers) == ["workflow_dispatch"]                    # 沒開啟 Pages 時 push / 排程只會天天失敗,所以只允許手動
+    assert "if" not in WF["jobs"]["deploy"]
 
 
 def test_pages_workflow_permissions_and_steps():

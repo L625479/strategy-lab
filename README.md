@@ -155,13 +155,17 @@ node tools/serve.mjs site 8080                  # 然後開 http://127.0.0.1:808
 
 沒有 `site/data/` 也能用:不會有內建標的,但可以上傳 CSV。
 
-## 部署成公開網站
+## 部署成公開網站(目前沒有部署)
 
-`.github/workflows/pages.yml` 會:抓最新價格 → 品質檢查 → 發布 `site/` 到 GitHub Pages;push 到 `main`(動到網站或抓資料的檔案)、每天一次、或在 Actions 頁面手動執行(deploy-site → Run workflow)都會觸發。
+網站是純靜態檔案,**目前沒有公開部署**。最簡單的用法是在自己的電腦上跑:
 
-第一次啟用: **Settings → Pages → Build and deployment → Source 選「GitHub Actions」**,然後手動執行一次 deploy-site。網址是 `https://<帳號>.github.io/<repo 名稱>/`。
+```bash
+python tools/fetch_prices.py --out site/data   # 抓最新價格(真實資料,Yahoo)
+node tools/serve.mjs site 8080                  # 開 http://127.0.0.1:8080/
+```
 
-其他靜態託管(Cloudflare Pages、Netlify、Vercel)也可以:先 `python tools/fetch_prices.py --out site/data`,再把 `site/` 當作發布目錄;資料更新要另外排程。
+`.github/workflows/pages.yml` 可以把 `site/` 發布到 GitHub Pages,但目前只能手動執行: 要先在 Settings → Pages → Source 選「GitHub Actions」(這一步無法由 Actions 自己完成)。
+開啟之後可以把 workflow 的 `on:` 改回 `push`(動到 `site/**`) + 每天一次的 `schedule`。其他靜態託管(Cloudflare Pages、Netlify、Vercel)也可以: 抓完價格後把 `site/` 當作發布目錄。
 
 ## 測試
 
