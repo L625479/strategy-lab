@@ -7,8 +7,8 @@ name: live-fetch-check
 on:
   workflow_dispatch: {}
   push:
-    branches: [claude/auto-fetch]
-    paths: ["tools/yahoo.mjs", "tools/api.mjs", "tools/serve.mjs", "tools/live_*", "site/js/engine/remote.js", "site/js/ui/targets.js", "site/js/app.js", ".github/workflows/live-fetch-check.yml"]
+    branches: [claude/auto-fetch, claude/python-strategies]
+    paths: ["tools/yahoo.mjs", "tools/api.mjs", "tools/pyapi.mjs", "tools/py_runner.py", "tools/serve.mjs", "tools/live_*", "strategies_py/**", "site/js/engine/remote.js", "site/js/engine/pystrategy.js", "site/js/ui/targets.js", "site/js/ui/editor.js", "site/js/app.js", ".github/workflows/live-fetch-check.yml"]
 
 permissions:
   contents: read
@@ -39,6 +39,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas numpy
       - run: npm i --no-save playwright && npx playwright install --with-deps chromium
       - name: 真的 Chromium + 真的 Yahoo
         run: node tools/live_e2e.mjs /tmp/shots

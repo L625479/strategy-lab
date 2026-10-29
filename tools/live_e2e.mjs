@@ -11,7 +11,7 @@ import { startServer } from './serve.mjs';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const shots = process.argv[2] || '/tmp/shots';
 mkdirSync(shots, { recursive: true });
-const server = await startServer(resolve(fileURLToPath(new URL('../site', import.meta.url))), 0, { api: {} });
+const server = await startServer(resolve(fileURLToPath(new URL('../site', import.meta.url))), 0, { api: { py: { dir: fileURLToPath(new URL('../strategies_py', import.meta.url)) } } });
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const problems = [], lines = [];
@@ -62,6 +62,36 @@ await page.click('#run');
 await page.waitForTimeout(3000);
 ok(!(await page.textContent('#results')).includes('錯誤'), '四檔組合(AAPL、^GSPC、2330.TW、BTC-USD,日曆不同)回測不報錯');
 await page.screenshot({ path: `${shots}/portfolio.png` });
+
+// Python 策略(strategies_py/ 附的範例)+ 真實資料: 與等價的規則策略績效必須完全相同,而且沒有「偷看未來」警告
+await page.click('button:has-text("規則策略")').catch(() => {});
+await page.click('button:has-text("單一標的")').catch(() => {});
+await search.fill('AAPL');
+await search.press('Enter');                                           // 已經有了: 只是選取它
+await page.waitForTimeout(500);
+await page.click('button:has-text("Python 策略")');
+await page.waitForSelector('select[aria-label="Python 策略"]:not([disabled])', { timeout: 30000 });
+const strategies = await page.$$eval('select[aria-label="Python 策略"] option', (os) => os.map((o) => o.value).filter(Boolean));
+lines.push(`INFO 策略資料夾裡的 Python 策略: ${JSON.stringify(strategies)}`);
+ok(strategies.includes('example_sma_cross') && strategies.includes('example_trend_filter'), '網站列出 strategies_py/ 附的兩個範例');
+await page.selectOption('select[aria-label="Python 策略"]', 'example_sma_cross');
+await page.fill('input[aria-label="python.params.fast"]', '8');
+await page.fill('input[aria-label="python.params.slow"]', '25');
+await page.click('#run');
+await page.waitForFunction(() => /範例: SMA 交叉/.test(document.querySelector('#results')?.textContent || ''), null, { timeout: 90000 });
+await page.waitForTimeout(1500);
+const pyKpis = (await page.textContent('#results .kpis')).replace(/\s+/g, ' ');
+const pyResults = await page.textContent('#results');
+lines.push(`INFO AAPL + Python 策略(SMA 8/25): ${pyKpis.slice(0, 160)}`);
+ok(!/疑似用到了未來的資料/.test(pyResults), 'Python 策略沒有「偷看未來」警告(真實資料)');
+await page.click('button:has-text("規則策略")');
+await page.fill('input[aria-label="entry.long"]', 'cross_above(sma(close, 8), sma(close, 25))');
+await page.fill('input[aria-label="exit.long"]', 'cross_below(sma(close, 8), sma(close, 25))');
+await page.click('#run');
+await page.waitForTimeout(2500);
+const ruleKpis = (await page.textContent('#results .kpis')).replace(/\s+/g, ' ');
+ok(ruleKpis === pyKpis, '真實資料: Python 策略與等價的規則策略績效完全相同', ruleKpis === pyKpis ? '' : `rules=${ruleKpis.slice(0, 120)}`);
+await page.screenshot({ path: `${shots}/python.png` });
 
 // 找不到
 await search.fill('ZZZZNOTREAL');
