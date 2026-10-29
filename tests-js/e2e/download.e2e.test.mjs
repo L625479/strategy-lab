@@ -68,10 +68,14 @@ test('輸入代號 → 搜尋結果 → 下載 → 自動選取 → 直接回測
   assert.equal(await search(page).inputValue(), '', '搜尋框清空');
   assert.equal(await page.locator('[data-testid=net-results]').count(), 0);
 
-  await page.click('#run');
-  await page.waitForSelector('.kpis');
-  await page.waitForFunction(() => /AAPL/.test(document.querySelector('#results').textContent));
+  // 不必再按「執行回測」: 下載完成就自動用目前的策略回測
+  await page.waitForFunction(() => /AAPL/.test(document.querySelector('#results').textContent) && document.querySelector('#results .kpis'));
   assert.match(await page.textContent('#results'), /AAPL/);
+  const first = await page.textContent('#results .kpis');
+  // 換一個標的: 結果跟著換;重新下載(更新)已選取的標的也會重跑
+  await search(page).fill('msft'); await search(page).press('Enter');
+  await page.waitForFunction(() => /MSFT/.test(document.querySelector('#results').textContent));
+  assert.notEqual(await page.textContent('#results .kpis'), first);
   assert.deepEqual(problems, []);
   await context.close();
 });

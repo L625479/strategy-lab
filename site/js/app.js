@@ -2,8 +2,9 @@
 
 import { toBars, cleanId, parseCsv, priceFileName } from './engine/data.js';
 import { runPortfolio } from './engine/portfolio.js';
-import { apiAvailable, downloadSeries, searchSymbols } from './engine/remote.js';
-import { compileStrategy, decodeShare, encodeShare, getTemplate } from './engine/strategy.js';
+import { signalsFromPython, pythonWarnings } from './engine/pystrategy.js';
+import { apiAvailable, downloadSeries, listPythonStrategies, pythonHealth, runPythonStrategy, searchSymbols } from './engine/remote.js';
+import { compileStrategy, computeSignals, decodeShare, encodeShare, getTemplate } from './engine/strategy.js';
 import { $, debounce, h } from './ui/dom.js';
 import { createEditor } from './ui/editor.js';
 import { renderEmpty, renderError, renderResults } from './ui/results.js';
@@ -58,7 +59,11 @@ async function shareLink() {
   try { await navigator.clipboard.writeText(url); toast('已複製分享連結(連結內含策略與標的設定)'); } catch { prompt('複製這個連結:', url); }
 }
 
-const editor = createEditor(editorMount, { onChange: persist, onShare: shareLink });
+const apiMarked = Boolean(document.querySelector('meta[name="strategy-lab-api"]'));   // 網站是不是由 tools/serve.mjs 提供(有 /api)
+const editor = createEditor(editorMount, {
+  onChange: persist, onShare: shareLink,
+  python: apiMarked ? { health: () => pythonHealth(), list: () => listPythonStrategies() } : null,
+});
 const userIds = new Set();
 
 async function onUpload(file) {
@@ -97,6 +102,8 @@ async function onDownload(symbol, { fresh = false } = {}) {
 const targets = createTargets(targetsMount, {
   onChange: persist,
   onUpload, onDownload, onSearch: (q) => searchSymbols(q),
+  // 輸入代號 → 下載 → 馬上用目前的策略回測(重新下載時,只有這個標的正被選取才重跑)
+  onDownloaded: ({ id, fresh }) => { if (!fresh || targets.get().items.some((i) => i.id === id)) run(); },
   onRemove: async (id) => { userIds.delete(id); priceCache.delete(id); await deleteUserSeries(id); targets.removeAsset(id); },
 });
 
@@ -145,18 +152,32 @@ async function run() {
   try {
     const ids = [...new Set([...t.items.map((i) => i.id), ...(t.benchmark ? [t.benchmark] : [])])];
     const loaded = Object.fromEntries(await Promise.all(ids.map(async (id) => [id, await getBars(id)])));
+    // Python 策略: 訊號在伺服器端(strategies_py/ 的 .py 檔)對每個標的算出來,成交與績效仍由這裡的回測引擎處理
+    const pyWarnings = [];
+    let externalSignals = null;
+    const py = compiled.compiled.python;
+    if (py) {
+      externalSignals = {};
+      await Promise.all(t.items.map(async (i) => {
+        const bars = loaded[i.id];
+        const resp = await runPythonStrategy({ id: py.id, params: py.params, bars, checkLookahead: py.checkLookahead });
+        externalSignals[i.id] = signalsFromPython(resp, bars, computeSignals(compiled.compiled, bars));
+        pyWarnings.push(...pythonWarnings(resp, i.id));
+      }));
+    }
     const result = runPortfolio({
+      externalSignals,
       assets: t.items.map((i) => ({ id: i.id, name: targets.asset(i.id)?.name, bars: loaded[i.id], weight: i.weight })),
       compiled: compiled.compiled, capital: t.capital, start: t.start || null, end: t.end || null,
       benchmark: t.benchmark ? { id: t.benchmark, bars: loaded[t.benchmark] } : null,
     });
     lastCtx = {
-      result, mode: t.mode, strategyName: compiled.compiled.strategy.name, warnings: compiled.warnings,
+      result, mode: t.mode, strategyName: compiled.compiled.strategy.name, warnings: [...compiled.warnings, ...pyWarnings],
       assetInfo: (id) => targets.asset(id) || { name: '', warn: '' }, colorSlot: targets.colorSlot,
     };
     draw(lastCtx);
   } catch (err) {
-    renderError(resultsMount, err.message || String(err));
+    renderError(resultsMount, compiled.compiled.python ? `Python 策略「${compiled.compiled.python.id}」: ${err.message || err}` : (err.message || String(err)));
   } finally {
     running = false; runBtn.disabled = false; runBtn.textContent = '執行回測'; resultsMount.style.opacity = '';
   }
@@ -196,7 +217,7 @@ for (const [key, [btn]] of Object.entries(TABS)) btn.addEventListener('click', (
 
 async function boot() {
   renderEmpty(resultsMount, false);
-  apiAvailable({ marked: Boolean(document.querySelector('meta[name="strategy-lab-api"]')) }).then((ok) => targets.setNetwork(ok));        // 有沒有「輸入代號自動下載」(要用 node tools/serve.mjs 啟動)
+  apiAvailable({ marked: apiMarked }).then((ok) => targets.setNetwork(ok));        // 有沒有「輸入代號自動下載」(要用 node tools/serve.mjs 啟動)
   const [{ assets, updated, source }, saved] = await Promise.all([loadUniverse(), listUserSeries()]);
   const mine = saved.map((s) => {
     const bars = toBars(s);

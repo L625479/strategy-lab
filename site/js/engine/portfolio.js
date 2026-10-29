@@ -41,9 +41,11 @@ function buyAndHold(bars, startIdx, endIdx, alloc) {
 
 /**
  * @param {{ assets: {id:string,name?:string,bars:object,weight:number}[], compiled: object,
- *           capital: number, start?: string, end?: string, benchmark?: {id:string,bars:object} }} args
+ *           capital: number, start?: string, end?: string, benchmark?: {id:string,bars:object},
+ *           externalSignals?: Record<string, object> }} args
+ *   externalSignals: 標的 id → 已經算好的訊號(Python 策略由伺服器算出來,見 pystrategy.js);有給就不再用規則語法計算
  */
-export function runPortfolio({ assets, compiled, capital, start = null, end = null, benchmark = null }) {
+export function runPortfolio({ assets, compiled, capital, start = null, end = null, benchmark = null, externalSignals = null }) {
   if (!(capital > 0)) throw new Error('初始資金必須大於 0');
   const active = assets.filter((a) => a.weight > 0);
   const totalWeight = active.reduce((s, a) => s + a.weight, 0);
@@ -61,7 +63,8 @@ export function runPortfolio({ assets, compiled, capital, start = null, end = nu
       warnings.push(`${a.id} 的資料從 ${a.bars.d[startIdx]} 才開始,在那之前這份資金以現金持有`);
     }
     const weight = a.weight / totalWeight, alloc = capital * weight;
-    const signals = computeSignals(compiled, a.bars);
+    if (compiled.python && !externalSignals?.[a.id]) throw new Error(`缺少 ${a.id} 的 Python 策略訊號(要先由伺服器執行 Python 策略)`);
+    const signals = externalSignals?.[a.id] || computeSignals(compiled, a.bars);
     const bt = runBacktest({ bars: a.bars, signals, strategy: compiled.strategy, capital: alloc, startIdx, endIdx });
     sleeves.push({
       id: a.id, name: a.name || a.id, weight, alloc, bars: a.bars, signals, startIdx, endIdx, bt,

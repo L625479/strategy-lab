@@ -33,3 +33,27 @@ export async function downloadSeries(symbol, { fresh = false, ...opts } = {}) {
     info: { symbol: j.symbol, name: j.name || j.symbol, source: j.source, updated: j.updated, currency: j.currency || '', exchange: j.exchange || '', warn: j.warn || '', stats: j.stats || {} },
   };
 }
+
+// ---- Python 策略(伺服器端執行 strategies_py/ 裡的 .py 檔) ----
+
+async function postJson(path, body, { fetchImpl = fetch, signal } = {}) {
+  const res = await fetchImpl(path, { method: 'POST', headers: { ...HEAD, 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store', signal });
+  let json = null;
+  try { json = await res.json(); } catch { /* 不是 JSON */ }
+  if (!res.ok) throw new Error(json?.error || `伺服器回應 HTTP ${res.status}`);
+  return json;
+}
+
+/** Python 策略可不可用: { available, python, pandas, numpy, dir, reason } */
+export async function pythonHealth(opts = {}) {
+  try { return await getJson('api/py/health', opts); } catch (e) { return { available: false, reason: e.message }; }
+}
+
+/** 策略資料夾裡的策略: [{ id, file, name, doc, params:[{name,value}], error? }] */
+export const listPythonStrategies = (opts = {}) => getJson('api/py/strategies', opts);
+
+/** 在伺服器端對一檔標的執行 Python 策略,回傳 py_runner 的結果(訊號、警告、偷看未來的檢查、策略的輸出) */
+export function runPythonStrategy({ id, params = {}, bars, checkLookahead = true }, opts = {}) {
+  const payload = { id, params, check_lookahead: checkLookahead, bars: { d: bars.d, o: Array.from(bars.o), h: Array.from(bars.h), l: Array.from(bars.l), c: Array.from(bars.c), v: Array.from(bars.v) } };
+  return postJson('api/py/run', payload, opts);
+}

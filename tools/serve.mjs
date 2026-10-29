@@ -39,8 +39,13 @@ export function startServer(root, port = 0, { api = null } = {}) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [root = 'site', port = '8080'] = process.argv.slice(2);
-  const server = await startServer(root, Number(port), { api: {} });
+  // node tools/serve.mjs [網站資料夾] [埠號] [--strategies 策略資料夾] [--python python 執行檔]
+  const args = process.argv.slice(2), flag = (name) => { const i = args.indexOf(name); return i >= 0 ? args.splice(i, 2)[1] : undefined; };
+  const strategies = flag('--strategies'), python = flag('--python');
+  const [root = 'site', port = '8080'] = args;
+  const dir = strategies || process.env.STRATEGY_LAB_STRATEGIES || fileURLToPath(new URL('../strategies_py', import.meta.url));
+  const server = await startServer(root, Number(port), { api: { py: { dir, ...(python ? { python } : {}) } } });
   console.log(`serving ${resolve(root)} at http://127.0.0.1:${server.address().port}/`);
-  console.log('輸入代號自動抓價格已啟用(資料來自 Yahoo Finance,需要網路)。按 Ctrl+C 結束。');
+  console.log('輸入代號自動抓價格已啟用(資料來自 Yahoo Finance,需要網路)。');
+  console.log(`Python 策略資料夾: ${dir}(把用 Python 寫的策略放在這裡,見 README「用 Python 寫策略」)。按 Ctrl+C 結束。`);
 }

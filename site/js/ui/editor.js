@@ -8,9 +8,21 @@ import { deleteStrategy, listStrategies, saveStrategy } from './store.js';
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
-export function createEditor(mount, { onChange = () => {}, onShare = () => {} } = {}) {
+export function createEditor(mount, { onChange = () => {}, onShare = () => {}, python = null } = {}) {
   let s = emptyStrategy();
   let note = '';
+  // Python 策略(伺服器端執行 strategies_py/ 裡的 .py 檔): python = { health(), list() };沒有給就表示這個網站沒有這個功能
+  const py = { health: null, list: null, loading: false, error: '' };
+  async function loadPython() {
+    py.loading = true; py.error = '';
+    render();
+    try {
+      py.health = python ? await python.health() : { available: false, reason: '這個網站不是由 tools/serve.mjs 提供,沒有 Python 策略功能。請用 node tools/serve.mjs site 8080 啟動。' };
+      py.list = py.health.available ? await python.list() : [];
+    } catch (err) { py.error = err.message; py.list = []; }
+    py.loading = false;
+    render();
+  }
 
   const changed = () => onChange(clone(s));
 
@@ -91,6 +103,48 @@ export function createEditor(mount, { onChange = () => {}, onShare = () => {} } 
       ));
   }
 
+  // ---- Python 策略 ----------------------------------------------------------------
+
+  function pythonBlock() {
+    if (!py.health && !py.loading) queueMicrotask(loadPython);
+    const picked = (py.list || []).find((x) => x.id === s.python.id);
+    const ok = py.health?.available;
+    const params = picked && !picked.error ? picked.params : [];
+    return [
+      h('div', { class: 'errors', hidden: !py.error, role: 'alert' }, py.error),
+      py.loading ? h('p', { class: 'status', role: 'status' }, '讀取 Python 策略清單中…') : null,
+      !py.loading && py.health && !ok ? h('div', { class: 'notice', 'data-testid': 'py-unavailable' }, py.health.reason) : null,
+      ok ? h('p', { class: 'hint', 'data-testid': 'py-status' }, `Python ${py.health.python}、pandas ${py.health.pandas} · 策略資料夾 ${py.health.dir}`) : null,
+      h('div', { class: 'row' },
+        h('div', { class: 'grow' }, field('python.id', h('select', { 'aria-label': 'Python 策略', disabled: !ok, onChange: (e) => {
+          const prev = (py.list || []).find((x) => x.id === s.python.id);
+          s.python.id = e.target.value; s.python.params = {};
+          const next = (py.list || []).find((x) => x.id === e.target.value);
+          const generic = s.name === emptyStrategy().name || s.name === prev?.name || TEMPLATES.some((t) => t.name === s.name);      // 名稱還是預設的 / 範本的 → 換成 Python 策略的名稱;使用者自己取的名字不動
+          if (next && generic) s.name = next.name;
+          render(); changed();
+        } },
+        h('option', { value: '' }, ok ? (py.list.length ? '選擇一個 Python 策略…' : '資料夾裡還沒有策略') : '(沒有可用的 Python 策略)'),
+        ...(py.list || []).map((x) => h('option', { value: x.id, disabled: Boolean(x.error), selected: x.id === s.python.id }, `${x.name}${x.name !== x.id ? `(${x.id})` : ''}${x.error ? ' — 載入失敗' : ''}`))))),
+        h('button', { type: 'button', class: 'ghost', disabled: py.loading, onClick: loadPython }, '重新整理')),
+      picked?.error ? h('div', { class: 'errors' }, `${picked.file}: ${picked.error}`) : null,
+      picked && !picked.error && picked.doc ? h('p', { class: 'hint', style: { whiteSpace: 'pre-wrap' } }, picked.doc) : null,
+      !picked && s.python.id && ok ? h('div', { class: 'notice' }, `資料夾裡找不到「${s.python.id}」(可能被改名或刪除)。請重新選擇。`) : null,
+      params.length ? h('div', { class: 'sect-title' }, '策略參數(預設值來自策略檔的 PARAMS)') : null,
+      ...params.map((p) => {
+        const value = Object.hasOwn(s.python.params, p.name) ? s.python.params[p.name] : p.value;
+        const set = (v) => { s.python.params[p.name] = v; changed(); };
+        return h('label', { class: 'field' }, p.name, typeof p.value === 'number'
+          ? numInput(`python.params.${p.name}`, value, set)
+          : textInput(`python.params.${p.name}`, String(value), set));
+      }),
+      h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.python.checkLookahead, 'aria-label': '檢查偷看未來', onChange: (e) => { s.python.checkLookahead = e.target.checked; changed(); } }),
+        '檢查策略有沒有偷看未來資料(把資料截短重跑 3 次,前面的訊號若被後面的資料改變就警告;建議保持開啟)'),
+      h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.allowShort, onChange: (e) => { s.allowShort = e.target.checked; changed(); } }), '允許做空(策略回傳 -1 或 entry_short 時才會放空)'),
+      h('p', { class: 'hint' }, '把用 Python 寫的策略放進 strategies_py/ 資料夾(範本: _template.py),存檔後按「重新整理」。約定與範例見 README「用 Python 寫策略」。手續費、滑價、投入比例、止損止盈照樣在下面設定;策略只負責「什麼時候進出」。'),
+    ];
+  }
+
   // ---- 策略庫(儲存/載入/匯出/匯入/分享) ----------------------------------------
 
   function library() {
@@ -144,23 +198,28 @@ export function createEditor(mount, { onChange = () => {}, onShare = () => {} } 
     const body = h('div', { class: 'body' },
       h('div', { class: 'errors', id: 'editor-errors', hidden: true, role: 'alert' }),
       h('div', { class: 'notice', id: 'editor-warnings', hidden: true }),
-      h('div', { class: 'row wrap' },
+      h('div', { class: 'seg', role: 'group', 'aria-label': '策略來源' },
+        h('button', { type: 'button', 'aria-pressed': String(s.source === 'rules'), onClick: () => { if (s.source !== 'rules') { s.source = 'rules'; render(); changed(); } } }, '規則策略(範本 / 自訂)'),
+        h('button', { type: 'button', 'aria-pressed': String(s.source === 'python'), onClick: () => { if (s.source !== 'python') { s.source = 'python'; render(); changed(); } } }, 'Python 策略')),
+      s.source === 'rules' ? h('div', { class: 'row wrap' },
         h('div', { class: 'grow' }, labelled('範本', templateSelect)),
-        h('div', { class: 'grow' }, labelled('策略名稱', textInput('name', s.name, (v) => { s.name = v; })))),
-      matched ? h('p', { class: 'hint' }, matched.description) : null,
+        h('div', { class: 'grow' }, labelled('策略名稱', textInput('name', s.name, (v) => { s.name = v; })))) : labelled('策略名稱', textInput('name', s.name, (v) => { s.name = v; })),
+      s.source === 'rules' && matched ? h('p', { class: 'hint' }, matched.description) : null,
 
-      h('div', { class: 'sect-title' }, '參數(可以在規則裡直接用名稱)'),
-      ...paramsBlock(),
-      h('div', { class: 'sect-title' }, '指標(由上往下計算,可以引用前面的)'),
-      ...indicatorsBlock(),
+      ...(s.source === 'python' ? pythonBlock() : [
+        h('div', { class: 'sect-title' }, '參數(可以在規則裡直接用名稱)'),
+        ...paramsBlock(),
+        h('div', { class: 'sect-title' }, '指標(由上往下計算,可以引用前面的)'),
+        ...indicatorsBlock(),
 
-      h('div', { class: 'sect-title' }, '進場條件'),
-      labelled('做多(為真就在下一根開盤買進)', textInput('entry.long', s.entry.long, (v) => { s.entry.long = v; }, { expr: true, placeholder: '例如 cross_above(fast, slow)' })),
-      s.allowShort ? labelled('做空(為真就在下一根開盤放空)', textInput('entry.short', s.entry.short, (v) => { s.entry.short = v; }, { expr: true })) : null,
-      h('div', { class: 'sect-title' }, '出場條件(留空 = 只靠止損/止盈出場)'),
-      labelled('多單出場', textInput('exit.long', s.exit.long, (v) => { s.exit.long = v; }, { expr: true })),
-      s.allowShort ? labelled('空單出場', textInput('exit.short', s.exit.short, (v) => { s.exit.short = v; }, { expr: true })) : null,
-      h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.allowShort, onChange: (e) => { s.allowShort = e.target.checked; render(); changed(); } }), '允許做空'),
+        h('div', { class: 'sect-title' }, '進場條件'),
+        labelled('做多(為真就在下一根開盤買進)', textInput('entry.long', s.entry.long, (v) => { s.entry.long = v; }, { expr: true, placeholder: '例如 cross_above(fast, slow)' })),
+        s.allowShort ? labelled('做空(為真就在下一根開盤放空)', textInput('entry.short', s.entry.short, (v) => { s.entry.short = v; }, { expr: true })) : null,
+        h('div', { class: 'sect-title' }, '出場條件(留空 = 只靠止損/止盈出場)'),
+        labelled('多單出場', textInput('exit.long', s.exit.long, (v) => { s.exit.long = v; }, { expr: true })),
+        s.allowShort ? labelled('空單出場', textInput('exit.short', s.exit.short, (v) => { s.exit.short = v; }, { expr: true })) : null,
+        h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.allowShort, onChange: (e) => { s.allowShort = e.target.checked; render(); changed(); } }), '允許做空'),
+      ]),
 
       h('div', { class: 'sect-title' }, '止損 / 止盈(距離以成交價計算)'),
       stopBlock('stopLoss', '止損'),
@@ -175,7 +234,7 @@ export function createEditor(mount, { onChange = () => {}, onShare = () => {} } 
         h('div', { class: 'grow' }, labelled('滑價 bps(單邊)', numInput('costs.slippageBps', s.costs.slippageBps, (v) => { s.costs.slippageBps = v; }, { min: 0 })))),
       h('p', { class: 'hint' }, '1 bps = 0.01%。美股 ETF 約 1~5;台股買賣手續費 + 賣出證交稅約合計 40~45。'),
 
-      syntaxHelp(),
+      s.source === 'rules' ? syntaxHelp() : null,
       h('div', { class: 'sect-title' }, '策略庫'),
       library());
 

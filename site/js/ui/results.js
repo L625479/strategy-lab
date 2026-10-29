@@ -275,7 +275,7 @@ export function renderEmpty(mount, hasData) {
 
 export function renderError(mount, message) {
   clear(mount);
-  mount.append(h('div', { class: 'errors', role: 'alert' }, h('strong', null, '無法執行回測'), h('p', null, message)));
+  mount.append(h('div', { class: 'errors', role: 'alert' }, h('strong', null, '無法執行回測'), h('p', { style: { whiteSpace: 'pre-wrap' } }, message)));
 }
 
 export { withAlpha, card, kpi, deltaLine, monthlyCard, legendKey };

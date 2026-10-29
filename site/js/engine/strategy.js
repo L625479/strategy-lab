@@ -4,7 +4,8 @@
 import { ExprError, analyze, asSeries, asSignal, evaluate, parse } from './expr.js';
 import { BUILTIN_SERIES, makeFunctions } from './indicators.js';
 
-export const LIMITS = { name: 40, params: 30, indicators: 30, expr: 500 };
+export const LIMITS = { name: 40, params: 30, indicators: 30, expr: 500, pyParams: 30 };
+const PY_ID = /^[A-Za-z0-9_-]{1,60}$/;
 const KEYWORDS = new Set(['and', 'or', 'not', 'true', 'false']);
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -12,6 +13,8 @@ export function emptyStrategy() {
   return {
     version: 1,
     name: '我的策略',
+    source: 'rules',                                   // 'rules' = 用規則語法寫的策略;'python' = 用 strategies_py/ 裡的 Python 策略產生進出場訊號
+    python: { id: '', params: {}, checkLookahead: true },
     params: [],
     indicators: [],
     entry: { long: '', short: '' },
@@ -119,6 +122,21 @@ function normStop(s, d) {
   return { mode, pct: num(o.pct, d.pct), atrN: num(o.atrN, d.atrN), atrMult: num(o.atrMult, d.atrMult), expr: str(o.expr, LIMITS.expr) };
 }
 
+/** Python 策略的設定: id、使用者改過的參數(數字 / 布林 / 文字)、是否檢查偷看未來 */
+function normPython(x) {
+  const o = x && typeof x === 'object' ? x : {};
+  const params = {};
+  if (o.params && typeof o.params === 'object' && !Array.isArray(o.params)) {
+    for (const [k, v] of Object.entries(o.params).slice(0, LIMITS.pyParams)) {
+      if (typeof k !== 'string' || !k || k.length > 40) continue;
+      if (typeof v === 'number' && Number.isFinite(v)) params[k] = v;
+      else if (typeof v === 'boolean') params[k] = v;
+      else if (typeof v === 'string') params[k] = v.slice(0, 200);
+    }
+  }
+  return { id: str(o.id, 60), params, checkLookahead: o.checkLookahead !== false };
+}
+
 /** 把任意物件整理成合法的策略結構(缺的補預設,型別不對的丟掉) */
 export function normalizeStrategy(input) {
   const base = emptyStrategy();
@@ -127,6 +145,8 @@ export function normalizeStrategy(input) {
   return {
     version: 1,
     name: str(o.name, LIMITS.name, base.name),
+    source: o.source === 'python' ? 'python' : 'rules',
+    python: normPython(o.python),
     params: list(o.params, LIMITS.params).map((p) => ({ name: str(p?.name, 30), value: num(p?.value, 0) })),
     indicators: list(o.indicators, LIMITS.indicators).map((p) => ({ name: str(p?.name, 30), expr: str(p?.expr, LIMITS.expr) })),
     entry: { long: str(o.entry?.long, LIMITS.expr), short: str(o.entry?.short, LIMITS.expr) },
@@ -200,21 +220,28 @@ export function compileStrategy(strategy) {
     return true;
   };
 
-  s.params.forEach((p, i) => {
-    defineName(p.name, `params[${i}].name`);
-  });
-  const indicators = [];
-  s.indicators.forEach((ind, i) => {
-    const ast = check(ind.expr, `indicators[${i}].expr`);
-    if (defineName(ind.name, `indicators[${i}].name`) && ast) indicators.push({ name: ind.name, ast });
-  });
+  // Python 策略: 進出場訊號由 strategies_py/ 裡的 Python 檔產生(伺服器端執行),規則語法的欄位不用檢查;止損止盈、倉位、成本仍由這裡處理
+  const isPy = s.source === 'python';
+  if (isPy && !PY_ID.test(s.python.id)) err('python.id', '請選擇一個 Python 策略(strategies_py/ 資料夾裡的 .py 檔)');
 
-  const rule = (src, field, opts) => check(src, field, opts);
-  const entryLong = rule(s.entry.long, 'entry.long', { allowEmpty: s.allowShort });
-  const entryShort = s.allowShort ? rule(s.entry.short, 'entry.short', { allowEmpty: true }) : null;
-  const exitLong = rule(s.exit.long, 'exit.long', { allowEmpty: true });
-  const exitShort = s.allowShort ? rule(s.exit.short, 'exit.short', { allowEmpty: true }) : null;
-  if (s.allowShort && !s.entry.long.trim() && !s.entry.short.trim()) err('entry.long', '做多與做空的進場條件至少要填一個');
+  const indicators = [];
+  let entryLong = null, entryShort = null, exitLong = null, exitShort = null;
+  if (!isPy) {
+    s.params.forEach((p, i) => {
+      defineName(p.name, `params[${i}].name`);
+    });
+    s.indicators.forEach((ind, i) => {
+      const ast = check(ind.expr, `indicators[${i}].expr`);
+      if (defineName(ind.name, `indicators[${i}].name`) && ast) indicators.push({ name: ind.name, ast });
+    });
+
+    const rule = (src, field, opts) => check(src, field, opts);
+    entryLong = rule(s.entry.long, 'entry.long', { allowEmpty: s.allowShort });
+    entryShort = s.allowShort ? rule(s.entry.short, 'entry.short', { allowEmpty: true }) : null;
+    exitLong = rule(s.exit.long, 'exit.long', { allowEmpty: true });
+    exitShort = s.allowShort ? rule(s.exit.short, 'exit.short', { allowEmpty: true }) : null;
+    if (s.allowShort && !s.entry.long.trim() && !s.entry.short.trim()) err('entry.long', '做多與做空的進場條件至少要填一個');
+  }
 
   const slSrc = stopExpression(s.stopLoss, '止損', (f, m) => err('stopLoss', m));
   const tpSrc = stopExpression(s.takeProfit, '止盈', (f, m) => err('takeProfit', m));
@@ -229,7 +256,7 @@ export function compileStrategy(strategy) {
   if (!(s.warmupBars >= 0 && s.warmupBars <= 2000)) err('warmupBars', '暖機根數必須介於 0 到 2000 之間');
 
   const hasExit = Boolean(exitLong || exitShort || slAst || tpAst);
-  if (!hasExit && !/^\s*true\s*$/.test(s.entry.long)) warnings.push('沒有任何出場條件、止損或止盈:進場後會一路持有到回測結束');
+  if (!isPy && !hasExit && !/^\s*true\s*$/.test(s.entry.long)) warnings.push('沒有任何出場條件、止損或止盈:進場後會一路持有到回測結束');
 
   return {
     ok: errors.length === 0,
@@ -241,6 +268,7 @@ export function compileStrategy(strategy) {
       indicators,
       rules: { entryLong, entryShort, exitLong, exitShort },
       stops: { sl: slAst, tp: tpAst },
+      python: isPy ? { id: s.python.id, params: s.python.params, checkLookahead: s.python.checkLookahead } : null,
     },
   };
 }

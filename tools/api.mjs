@@ -6,6 +6,7 @@
 // (自訂標頭會讓別的網站的跨網域請求先被瀏覽器的預檢擋下,而這裡不回應預檢);代號只接受 Yahoo 代號會用到的字元,
 // 只會連到固定的 Yahoo 主機,不會依輸入組出任意網址。
 
+import { createPy } from './pyapi.mjs';
 import { FetchError, SYMBOL_RE, loadSymbol, searchSymbols } from './yahoo.mjs';
 
 const HOST_RE = /^(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/;
@@ -22,7 +23,8 @@ function explain(err, symbol) {
   return [502, `連不上 Yahoo Finance: ${err?.message || err}`];
 }
 
-export function createApi({ fetchImpl = fetch, now = () => new Date(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), pauseMs = 300, ttlMs = 6 * HOUR, searchTtlMs = HOUR / 6, maxCache = 200 } = {}) {
+export function createApi({ fetchImpl = fetch, now = () => new Date(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), pauseMs = 300, ttlMs = 6 * HOUR, searchTtlMs = HOUR / 6, maxCache = 200, py = null } = {}) {
+  const pyApi = py ? createPy(py) : null;
   const cache = new Map(), inflight = new Map();
   let chain = Promise.resolve();
 
@@ -51,11 +53,21 @@ export function createApi({ fetchImpl = fetch, now = () => new Date(), sleep = (
     res.end(JSON.stringify(body));
   };
 
+  const MAX_BODY = 60 * 1024 * 1024;
+  const readBody = (req) => new Promise((resolveBody, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => { size += c.length; if (size > MAX_BODY) { reject(Object.assign(new Error('請求太大'), { status: 413 })); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => resolveBody(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+
   /** 處理 /api/* 的請求;不是 /api 的網址回傳 false(交給靜態檔案) */
   async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
     if (!url.pathname.startsWith('/api/')) return false;
-    if (req.method !== 'GET') { send(res, 405, { error: '只支援 GET' }); return true; }
+    const isPyRun = url.pathname === '/api/py/run';
+    if (req.method !== (isPyRun ? 'POST' : 'GET')) { send(res, 405, { error: isPyRun ? '只支援 POST' : '只支援 GET' }); return true; }
     if (!HOST_RE.test(req.headers.host || '')) { send(res, 403, { error: '不允許的 Host' }); return true; }
     if (req.headers['x-strategy-lab'] !== '1') { send(res, 403, { error: '缺少 X-Strategy-Lab 標頭' }); return true; }
 
@@ -87,6 +99,24 @@ export function createApi({ fetchImpl = fetch, now = () => new Date(), sleep = (
         send(res, status, { error: message });
       }
       return true;
+    }
+
+    if (url.pathname.startsWith('/api/py/')) {
+      if (!pyApi) { send(res, url.pathname === '/api/py/health' ? 200 : 404, url.pathname === '/api/py/health' ? { available: false, reason: '這個伺服器沒有啟用 Python 策略' } : { error: '沒有啟用 Python 策略' }); return true; }
+      if (url.pathname === '/api/py/health') { send(res, 200, await pyApi.health()); return true; }
+      if (url.pathname === '/api/py/strategies') {
+        const r = await pyApi.list();
+        send(res, r.ok ? 200 : (r.status || 500), r.ok ? r.strategies : { error: r.error });
+        return true;
+      }
+      if (isPyRun) {
+        if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) { send(res, 415, { error: '需要 Content-Type: application/json' }); return true; }
+        let body;
+        try { body = JSON.parse(await readBody(req)); } catch (e) { send(res, e.status || 400, { error: e.status === 413 ? '請求太大' : '請求不是有效的 JSON' }); return true; }
+        const r = await pyApi.run(body);
+        send(res, r.ok ? 200 : (r.status || 422), r);
+        return true;
+      }
     }
 
     send(res, 404, { error: '沒有這個 API' });

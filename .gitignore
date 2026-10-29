@@ -6,3 +6,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+
+# 你自己的 Python 策略(研究中的策略不要不小心推上公開的 repo);範例、範本與說明會被追蹤
+strategies_py/*
+!strategies_py/README.md
+!strategies_py/_template.py
+!strategies_py/example_*.py

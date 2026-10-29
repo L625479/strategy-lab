@@ -15,7 +15,8 @@ site/                      網站本體(靜態檔案,任何靜態託管都能放
     metrics.js             績效指標
     data.js                價格 JSON / CSV 解析
     daytrade.js            當沖(當日進出)規則引擎: 逐筆統計、規則網格、驗收與候選選擇
-    remote.js              呼叫本機伺服器的 /api(搜尋代號、下載價格)
+    remote.js              呼叫本機伺服器的 /api(搜尋代號、下載價格、執行 Python 策略)
+    pystrategy.js          Python 策略的結果 → 回測引擎的訊號(驗證、轉換、警告文字)
     npz.js                 讀 numpy 的 .npz(研究程式產生的日線面板與盤中 K 線檔)
     intraday.js            盤中 K 線驗證: 用 60 分 / 5 分 K 解開限價成交與停利的先後、I1 / I2 切分、合格判定
     dtService.js           當沖掃描的服務層(載入、掃描、holdout、明細、盤中掃描與確認);Worker 與測試共用
@@ -29,18 +30,20 @@ tools/
   fetch_prices.py          抓日線價格 + 資料品質閘門 → site/data/
   universe.json            內建標的清單(要增減標的就改這裡)
   serve.mjs                本機伺服器(網站靜態檔案 + /api)
+  pyapi.mjs, py_runner.py  /api/py: 在本機執行 strategies_py/ 裡用 Python 寫的策略(見「用 Python 寫策略」)
   api.mjs                  /api: 輸入代號自動下載(搜尋、抓價格、快取、節流、請求檢查)
   yahoo.mjs                Yahoo 日線下載、清理與品質檢查(fetch_prices.py 的 JS 移植)
   live_check.mjs, live_dump_python.py, live_e2e.mjs   用真實 Yahoo 驗證上面這些(GitHub Actions 的 live-fetch-check)
   verify_prices.py         用獨立來源(Nasdaq / CBOE / 財政部)交叉驗證抓到的價格
   reproduce_notes.mjs      用真實價格重現研究筆記裡記載的結果,並排印出來
+strategies_py/             用 Python 寫的策略放這裡(範本、範例;你自己的檔案不進 git)
 tests-js/                  引擎單元測試、對 Python 實作的一致性測試、瀏覽器端對端測試
 tests/                     資料管線與部署設定的測試
 ```
 
 ## 怎麼用
 
-1. **寫策略**:從範本開始(均線交叉、EMA + RSI、通道突破、RSI 反彈、布林、MACD、買入持有…),或自己寫進出場規則。
+1. **寫策略**:從範本開始(均線交叉、EMA + RSI、通道突破、RSI 反彈、布林、MACD、買入持有…),或**自訂**: 自己加參數、指標、進出場規則(規則語法,見下面);也可以切到「**Python 策略**」,用你自己的 Python 程式產生進出場訊號(見「用 Python 寫策略」)。
 2. **選標的**:單一標的,或投資組合(最多 8 檔、自訂權重)。**在搜尋框輸入代號或公司名稱就會自動從網路下載資料**(例如 `AAPL`、`2330.TW`、`^GSPC`、`BTC-USD`、`Tesla`),不需要自己找 CSV;這個功能要用 `node tools/serve.mjs site 8080` 啟動網站(見下面)。也可以上傳 CSV(TradingView、Yahoo 匯出都可以)。
 3. **執行回測**(或按 Ctrl/⌘ + Enter),看績效、回撤、月報酬、每一筆交易。
 
@@ -69,6 +72,41 @@ cross_above(ema(close, 12), ema(close, 26)) and rsi(close, 14) < 70 and close > 
 - 暖機期(指標還是空值)不會產生訊號;NaN 的比較一律視為假。
 
 規則解析器是自己寫的(不使用 `eval` / `new Function`),使用者輸入無法執行 JavaScript;長度、巢狀深度、歷史索引都有上限,並有針對這些情況的測試。
+
+## 用 Python 寫策略
+
+策略可以不用規則語法,而是用你自己的 Python 程式。策略編輯器最上方切到「**Python 策略**」,選一個策略就能回測,**輸入代號下載資料後會自動用它回測**。
+Python 只負責「什麼時候進出」;成交假設(收盤確認、下一根開盤成交)、止損止盈、投入比例、手續費與滑價、績效指標、圖表都和規則策略共用同一個引擎。
+
+**需求**:Python 3 與 `pip install pandas numpy`。網站要用 `node tools/serve.mjs site 8080` 啟動(Python 在這台本機伺服器上執行,不在瀏覽器裡)。找不到 Python 時,編輯器會說明原因與怎麼修。
+
+**放哪裡**:`strategies_py/` 資料夾(範本 `_template.py`、範例 `example_sma_cross.py`、`example_trend_filter.py`)。存檔後在網站按「重新整理」就會列出來,不用重啟。
+你自己的策略檔**預設不會被 git 追蹤**(`.gitignore`),避免把研究中的策略不小心推上公開的 repo。想用你研究專案裡的資料夾:`node tools/serve.mjs site 8080 --strategies /path/to/strategies`(也可以設環境變數 `STRATEGY_LAB_STRATEGIES`);指定 Python:`--python /path/to/python` 或 `STRATEGY_LAB_PYTHON`。
+
+**約定**(一個 `.py` 檔 = 一個策略,檔名去掉 `.py` 是策略 id):
+
+```python
+NAME = "我的策略"                       # 選用: 網站上顯示的名稱
+PARAMS = {"fast": 12, "slow": 26}      # 選用: 預設參數,網站上變成可以修改的欄位(數字或文字)
+
+def run(df, params):
+    # df: pandas.DataFrame,索引是日期(由舊到新、不重複),欄位 open high low close volume(調整後價格)
+    # 回傳長度和 df 相同的結果,二選一:
+    #   1. 目標部位序列: +1 做多 / 0 空手 / -1 放空
+    #   2. dict: entry_long / exit_long / entry_short / exit_short(布林序列),
+    #            stop_loss_pct / take_profit_pct(距離成交價的百分比序列,5 = 5%,NaN = 不設)
+    ...
+```
+
+- **時點**:第 t 根收盤算出的訊號,在第 t+1 根開盤成交(和規則策略相同)。回傳值裡的 NaN = 這根還沒有訊號(指標暖機中),不會交易。
+- **部位模式**是「目標」: 空手時目標是多就進場、持有多單時目標不是多就出場(空單同理);止損止盈觸發出場後,如果目標還是多,下一根會再進場。要精確控制「只在穿越那一根進場」請用事件模式。**部位大小會被忽略**(只取 +1 / 0 / -1,並警告);分數權重請用「目標權重」分頁。放空要在網站上勾「允許做空」。
+- **偷看未來的檢查(預設開啟)**:Python 拿得到整段歷史,規則語法沒有這個風險,所以網站會把資料截短再重跑(截到倒數第二根,以及最多 6 個「進場訊號為真的那一根」之後),**前面的訊號如果因為後面的資料而改變,就在結果頁警告**(哪一天、哪個訊號、截到第幾根)。選在進場訊號之後截短,是因為偷看未來的策略正是在這些地方靠未來資料才成立;測試裡對 25 組不同資料、三種偷看方式(整段偷看、只有後半偷看、只靠 NaN 的位置偷看)都 100% 抓到,誠實的策略 0 次誤報;沒有任何進出場訊號、只靠止損序列偷看的情形也有測試。常見原因:`shift(-1)`、整段資料的平均 / 最大最小值 / 標準化、`bfill`。有隨機性的策略請固定亂數種子,否則會誤報。少於 100 根不檢查;檢查用的截短重跑失敗時回報「沒有結論」,不當成通過也不當成失敗。
+- **除錯**:策略裡的 `print` 會顯示在結果頁(前 3 行);執行出錯會顯示例外與最後幾行 traceback;回傳格式不對會說明哪裡不對(長度、不認得的鍵、inf、非正的止損…)。
+- **安全**:策略以你的身分在你的電腦上執行(和你自己在終端機跑 `python` 一樣),**不要放來路不明的檔案**。`/api/py` 只會執行資料夾裡的 `.py`(id 只能是英數字 / 底線 / 連字號)、每次一個獨立子行程、有逾時(預設 120 秒)、同時最多 2 個,並套用和 `/api` 相同的請求檢查(只聽本機、Host 檢查、自訂標頭、POST 必須是 `application/json`)。
+- **目前只接在「策略回測」分頁**。「目標權重」與「當沖掃描」仍用規則語法 / JSON 網格;你的研究程式(`lab/` 裡的策略)要接到那兩頁時,把檔案給我,我照同樣的方式(先對照你的 Python 輸出做一致性測試)接上。
+
+**驗證**:同一份資料上,Python 策略與等價的規則策略(`example_sma_cross` ↔ `cross_above(sma(close, 8), sma(close, 25))` 等)產生的**交易逐筆相同**(進出場日、價格、股數、損益、出場原因),涵蓋事件模式、部位模式(含 +1 / -1 做空)、搭配止損止盈 / 倉位比例 / 成本;
+瀏覽器裡兩種寫法跑出的績效指標也完全相同。偷看未來的策略會被抓出來,誠實的不會。以上用真的 Python 子行程測試(`tests-js/pyapi.test.js`、`tests/test_py_runner.py`、`tests-js/e2e/python.e2e.test.mjs`),並做過突變測試(故意改壞 39 種做法;第一輪有 8 個沒被擋下,補測試後全部擋下,其中一個是多餘的備援截短位置,已移除)。
 
 ## 成交與績效假設
 
@@ -268,7 +306,7 @@ node tools/serve.mjs site 8080                  # 開 http://127.0.0.1:8080/
 ```bash
 npm test                                   # 181 個:指標、解析器、回測、投資組合、績效、CSV、當沖引擎、盤中 K 線、.npz、目標權重帳戶、對 Python 實作的一致性
 pip install -r requirements-dev.txt
-python -m pytest                           # 36 個:資料管線、獨立驗證工具、部署設定
+python -m pytest                           # 60 個:資料管線、獨立驗證工具、部署設定、Python 策略執行器
 npm i --no-save playwright && npx playwright install chromium
 node --test tests-js/e2e/*.test.mjs        # 44 個:在真實 Chromium 裡操作網站(用合成資料)
 ```

@@ -18,7 +18,7 @@ function shiftYears(iso, years) {
 
 export function createTargets(mount, {
   onChange = () => {}, onUpload = async () => { throw new Error('尚未支援'); }, onRemove = async () => {},
-  onSearch = async () => [], onDownload = async () => { throw new Error('尚未支援'); },
+  onSearch = async () => [], onDownload = async () => { throw new Error('尚未支援'); }, onDownloaded = () => {},
 } = {}) {
   let assets = [];                   // [{id,name,category,first,last,n,warn}]
   let t = { mode: 'single', items: [], start: '', end: '', capital: 100000, benchmark: '' };
@@ -154,6 +154,7 @@ export function createTargets(mount, {
       query = ''; net.results = []; net.error = ''; net.loading = false; searchSeq++;
       net.busy = '';
       addAsset(res.asset, !fresh);
+      onDownloaded({ id: res.asset.id, fresh });                        // 下載完成 → 通知外面(自動用目前的策略跑回測)
       return;
     } catch (err) { message = `下載失敗: ${err.message}`; }
     net.busy = '';
