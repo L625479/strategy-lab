@@ -1,0 +1,198 @@
+// 標的與期間: 單一標的 / 投資組合、搜尋與選擇、權重、期間、起始資金、基準、CSV 上傳。
+
+import { clear, h } from './dom.js';
+
+export const MAX_ASSETS = 8; // 圖表的類別色票只有 8 個固定順序的槽位,所以組合上限 8 檔
+
+const PRESETS = [['近 1 年', 1], ['近 3 年', 3], ['近 5 年', 5], ['近 10 年', 10], ['全部', 0]];
+const clone = (x) => JSON.parse(JSON.stringify(x));
+
+function shiftYears(iso, years) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCFullYear(d.getUTCFullYear() - years);
+  return d.toISOString().slice(0, 10);
+}
+
+export function createTargets(mount, { onChange = () => {}, onUpload = async () => { throw new Error('尚未支援'); }, onRemove = async () => {} } = {}) {
+  let assets = [];                   // [{id,name,category,first,last,n,warn}]
+  let t = { mode: 'single', items: [], start: '', end: '', capital: 100000, benchmark: '' };
+  let query = '', message = '';
+  const slots = new Map();           // id -> 1..8: 顏色跟著標的,不跟著排名
+
+  const byId = (id) => assets.find((a) => a.id === id);
+  const changed = () => onChange(clone(t));
+
+  function slotOf(id) {
+    if (!slots.has(id)) {
+      const used = new Set(slots.values());
+      for (let k = 1; k <= MAX_ASSETS; k++) if (!used.has(k)) { slots.set(id, k); break; }
+      if (!slots.has(id)) slots.set(id, 8);
+    }
+    return slots.get(id);
+  }
+
+  function setItems(items) {
+    const keep = new Set(items.map((i) => i.id));
+    for (const id of [...slots.keys()]) if (!keep.has(id)) slots.delete(id);
+    t.items = items;
+    items.forEach((i) => slotOf(i.id));
+  }
+
+  function toggle(id) {
+    const has = t.items.some((i) => i.id === id);
+    if (t.mode === 'single') {
+      if (!has) { setItems([{ id, weight: 1 }]); message = ''; }
+    } else if (has) {
+      if (t.items.length > 1) setItems(t.items.filter((i) => i.id !== id));
+    } else if (t.items.length >= MAX_ASSETS) {
+      message = `投資組合最多 ${MAX_ASSETS} 檔(圖表只有 ${MAX_ASSETS} 個固定顏色,再多就分不清楚了)`;
+    } else {
+      setItems([...t.items, { id, weight: 1 }]); message = '';
+    }
+    render(); changed();
+  }
+
+  function availableRange() {
+    const sel = t.items.map((i) => byId(i.id)).filter(Boolean);
+    if (!sel.length) return null;
+    return { first: sel.map((a) => a.first).sort().at(-1), last: sel.map((a) => a.last).sort().at(0), firstAny: sel.map((a) => a.first).sort()[0], lastAny: sel.map((a) => a.last).sort().at(-1) };
+  }
+
+  function picker() {
+    const q = query.trim().toLowerCase();
+    const shown = assets.filter((a) => !q || a.id.toLowerCase().includes(q) || a.name.toLowerCase().includes(q));
+    const groups = [...new Set(shown.map((a) => a.category))];
+    const selected = new Set(t.items.map((i) => i.id));
+    const list = h('div', { class: 'picker', role: 'listbox', 'aria-label': '標的清單', 'aria-multiselectable': t.mode === 'portfolio' });
+    if (!assets.length) list.append(h('p', { class: 'hint', style: { padding: '10px' } }, '目前沒有內建的行情資料。請用下方的「上傳 CSV」加入你自己的資料(例如從 TradingView 匯出)。'));
+    for (const g of groups) {
+      list.append(h('div', { class: 'group' }, g));
+      for (const a of shown.filter((x) => x.category === g)) {
+        const row = h('div', { class: 'pick-row' },
+          h('button', { type: 'button', role: 'option', 'aria-pressed': selected.has(a.id), 'aria-selected': selected.has(a.id), onClick: () => toggle(a.id) },
+            h('span', { class: 'sym' }, a.id), h('span', { class: 'nm' }, a.name)));
+        if (a.category === '我的資料') {
+          row.append(h('button', { type: 'button', class: 'pick-del ghost', 'aria-label': `刪除上傳的資料 ${a.id}`, title: '從這個瀏覽器刪除這份資料', onClick: () => { if (confirm(`刪除上傳的資料「${a.id}」?`)) onRemove(a.id); } }, '刪除'));
+        }
+        list.append(row);
+      }
+    }
+    if (assets.length && !shown.length) list.append(h('p', { class: 'hint', style: { padding: '10px' } }, '找不到符合的標的'));
+    return list;
+  }
+
+  function chips() {
+    const box = h('div', { class: 'chips' });
+    for (const item of t.items) {
+      const a = byId(item.id) || { id: item.id, name: '' };
+      box.append(h('div', { class: 'chip' },
+        h('span', { class: 'dot', style: { background: `var(--s${slotOf(item.id)})` }, 'aria-hidden': 'true' }),
+        h('div', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' } },
+          h('strong', null, a.id), ' ', h('span', { class: 'muted small' }, a.name),
+          a.warn ? h('span', { class: 'warn-tag', title: a.warn }, '資料警告') : null),
+        t.mode === 'portfolio'
+          ? h('div', { class: 'w' }, h('input', { type: 'number', min: 0, step: 'any', value: item.weight, 'aria-label': `${a.id} 權重`, onInput: (e) => { item.weight = Math.max(0, Number(e.target.value) || 0); changed(); } }))
+          : h('span'),
+        t.mode === 'portfolio' && t.items.length > 1
+          ? h('button', { class: 'icon ghost', type: 'button', 'aria-label': `移除 ${a.id}`, onClick: () => toggle(item.id) }, '×')
+          : h('span')));
+    }
+    return box;
+  }
+
+  function render() {
+    clear(mount);
+    const range = availableRange();
+    const hasWarn = t.items.map((i) => byId(i.id)).filter((a) => a?.warn);
+    const fileInput = h('input', { type: 'file', accept: '.csv,text/csv', hidden: true, onChange: async (e) => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      try {
+        const res = await onUpload(file);
+        message = res.message || '';
+        addAsset(res.asset, true);
+      } catch (err) { message = `上傳失敗: ${err.message}`; render(); }
+    } });
+
+    const body = h('div', { class: 'body' },
+      h('div', { class: 'row wrap' },
+        h('div', { class: 'seg', role: 'group', 'aria-label': '模式' },
+          h('button', { type: 'button', 'aria-pressed': t.mode === 'single', onClick: () => { if (t.mode !== 'single') { t.mode = 'single'; setItems(t.items.slice(0, 1)); render(); changed(); } } }, '單一標的'),
+          h('button', { type: 'button', 'aria-pressed': t.mode === 'portfolio', onClick: () => { if (t.mode !== 'portfolio') { t.mode = 'portfolio'; render(); changed(); } } }, '投資組合')),
+        h('span', { class: 'hint' }, t.mode === 'single' ? '只看一檔標的的績效' : `最多 ${MAX_ASSETS} 檔,按權重分配資金`)),
+
+      h('input', { type: 'text', placeholder: '搜尋代號或名稱…', value: query, 'aria-label': '搜尋標的', autocomplete: 'off', onInput: (e) => {
+        query = e.target.value;
+        const pos = e.target.selectionStart;
+        render();
+        const again = mount.querySelector('input[type="text"]');
+        again.focus(); again.setSelectionRange(pos, pos);
+      } }),
+      picker(),
+      message ? h('p', { class: 'hint', role: 'status' }, message) : null,
+      chips(),
+      t.mode === 'portfolio' && t.items.length > 1
+        ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'ghost', onClick: () => { t.items.forEach((i) => { i.weight = 1; }); render(); changed(); } }, '平均權重'), h('span', { class: 'hint' }, '權重會自動換算成 100%'))
+        : null,
+      hasWarn.length ? h('div', { class: 'notice' }, hasWarn.map((a) => h('div', null, `${a.id}: ${a.warn}`))) : null,
+
+      h('div', { class: 'sect-title' }, '回測期間'),
+      h('div', { class: 'row wrap' },
+        h('div', { class: 'grow' }, h('label', { class: 'field' }, '開始', h('input', { type: 'date', value: t.start, 'aria-label': '開始日期', onChange: (e) => { t.start = e.target.value; changed(); } }))),
+        h('div', { class: 'grow' }, h('label', { class: 'field' }, '結束', h('input', { type: 'date', value: t.end, 'aria-label': '結束日期', onChange: (e) => { t.end = e.target.value; changed(); } })))),
+      h('div', { class: 'chips-row' }, PRESETS.map(([label, years]) => h('button', { type: 'button', class: 'toggle-chip', onClick: () => {
+        const r = availableRange();
+        t.end = '';
+        t.start = years && r ? shiftYears(r.lastAny, years) : '';
+        render(); changed();
+      } }, label))),
+      range ? h('p', { class: 'hint' }, `所選資料範圍: ${range.firstAny} ~ ${range.lastAny}。開始日之前的資料仍會用來預熱指標。`) : null,
+
+      h('div', { class: 'row wrap' },
+        h('div', { class: 'grow' }, h('label', { class: 'field' }, '起始資金', h('input', { type: 'number', min: 1, step: 'any', value: t.capital, 'aria-label': '起始資金', onInput: (e) => { t.capital = Number(e.target.value) || 0; changed(); } }))),
+        h('div', { class: 'grow' }, h('label', { class: 'field' }, '額外比較基準(買入持有)', h('select', { 'aria-label': '比較基準', onChange: (e) => { t.benchmark = e.target.value; changed(); } },
+          h('option', { value: '' }, '無'), ...assets.map((a) => h('option', { value: a.id, selected: t.benchmark === a.id }, `${a.id} ${a.name}`)))))),
+
+      h('div', { class: 'row wrap' },
+        h('button', { type: 'button', onClick: () => fileInput.click() }, '上傳 CSV…'),
+        h('span', { class: 'hint' }, '需要 time/date、open、high、low、close 欄位(TradingView、Yahoo 匯出都可)'),
+        fileInput));
+
+    mount.append(h('details', { class: 'card', open: true }, h('summary', null, '標的與期間'), body));
+  }
+
+  function addAsset(asset, select) {
+    const i = assets.findIndex((a) => a.id === asset.id);
+    if (i >= 0) assets[i] = asset; else assets.push(asset);
+    assets.sort((a, b) => (a.category === '我的資料' ? 0 : 1) - (b.category === '我的資料' ? 0 : 1)); // 穩定排序,我的資料排最前面
+    if (select) {
+      if (t.mode === 'single') setItems([{ id: asset.id, weight: 1 }]);
+      else if (!t.items.some((x) => x.id === asset.id) && t.items.length < MAX_ASSETS) setItems([...t.items, { id: asset.id, weight: 1 }]);
+    }
+    render(); changed();
+  }
+
+  render();
+  return {
+    get: () => clone(t),
+    set(next) {
+      t = { mode: next.mode === 'portfolio' ? 'portfolio' : 'single', items: [], start: next.start || '', end: next.end || '', capital: Number(next.capital) > 0 ? Number(next.capital) : 100000, benchmark: next.benchmark || '' };
+      const valid = (next.items || []).filter((i) => byId(i.id)).slice(0, t.mode === 'single' ? 1 : MAX_ASSETS);
+      setItems(valid.map((i) => ({ id: i.id, weight: Number(i.weight) >= 0 ? Number(i.weight) : 1 })));
+      if (t.benchmark && !byId(t.benchmark)) t.benchmark = '';
+      render();
+    },
+    setAssets(list) { assets = list.slice(); render(); },
+    addAsset,
+    removeAsset(id) {
+      assets = assets.filter((a) => a.id !== id);
+      setItems(t.items.filter((i) => i.id !== id));
+      render(); changed();
+    },
+    colorSlot: slotOf,
+    asset: byId,
+    list: () => assets.slice(),
+    hasAssets: () => assets.length > 0,
+  };
+}

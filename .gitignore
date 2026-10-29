@@ -1,0 +1,8 @@
+# 價格資料: 部署時由 tools/fetch_prices.py 產生,不進版控
+site/data/
+
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store

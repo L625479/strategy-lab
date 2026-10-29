@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>策略實驗室 — 輸入交易策略,回測單一標的或投資組合</title>
+  <meta name="description" content="在瀏覽器中輸入你自己的交易策略(均線、RSI、突破…),立即回測單一標的或投資組合的績效。策略與資料只留在你的瀏覽器。">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M5 22l7-8 5 5 10-12' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="row"><h1>策略實驗室</h1><span class="sub">輸入你的交易策略,看單一標的或投資組合的績效</span></div>
+    <nav class="tabs" role="tablist" aria-label="功能">
+      <button role="tab" id="tab-bt" type="button" aria-selected="true" aria-controls="app-bt">策略回測</button>
+      <button role="tab" id="tab-dt" type="button" aria-selected="false" aria-controls="app-dt">當沖掃描</button>
+    </nav>
+    <button id="theme" class="ghost" type="button" aria-label="切換亮色/暗色模式" title="切換亮色/暗色模式">◐</button>
+  </header>
+
+  <main class="app" id="app-bt" role="tabpanel" aria-labelledby="tab-bt">
+    <section class="panel" id="panel" aria-label="設定"></section>
+    <section class="results" id="results" aria-live="polite" aria-label="回測結果"></section>
+  </main>
+  <main class="app" id="app-dt" role="tabpanel" aria-labelledby="tab-dt" hidden>
+    <section class="panel" id="panel-dt" aria-label="當沖掃描設定"></section>
+    <section class="results" id="results-dt" aria-live="polite" aria-label="當沖掃描結果"></section>
+  </main>
+
+  <footer>
+    <p>回測是用歷史資料模擬,不代表未來績效,也不是投資建議。成交假設:收盤確認訊號、下一根開盤成交;止損與止盈以 K 棒高低點判斷,同一根都碰到時取止損;不計融資利息與股利再投資以外的稅費。</p>
+    <p>當沖掃描的成交假設:限價單與停利單必須被穿價才算成交,成交在限價;日線分不出盤中高低點的先後,所以限價進場加停利的規則同時列出保守與樂觀兩種算法(正式數字看保守);資料品質過濾使用當日 K 棒。</p>
+    <p>你的策略與上傳的資料只存在這個瀏覽器裡,不會傳到伺服器。</p>
+    <p>圖表由 <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView Lightweight Charts™</a> 提供,Copyright © TradingView, Inc.(Apache-2.0)。</p>
+  </footer>
+
+  <script src="vendor/lightweight-charts.standalone.production.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

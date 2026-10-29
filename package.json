@@ -1,0 +1,10 @@
+{
+  "name": "strategy-lab",
+  "private": true,
+  "type": "module",
+  "description": "策略實驗室: 在瀏覽器中輸入交易策略,回測單一標的或投資組合的績效",
+  "scripts": {
+    "test": "node --test \"tests-js/**/*.test.js\"",
+    "serve": "node tools/serve.mjs site 8080"
+  }
+}

@@ -1,0 +1,249 @@
+{
+ "params": {
+  "fast": 8,
+  "slow": 21,
+  "rsi_n": 14,
+  "lo": 20,
+  "hi": 80
+ },
+ "warmup": 100,
+ "trades": [
+  {
+   "entryDate": "2020-07-14",
+   "entryPrice": 0.91887575,
+   "exitDate": "2020-08-05",
+   "exitPrice": 0.93018607,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2020-10-04",
+   "entryPrice": 0.86517936,
+   "exitDate": "2020-10-05",
+   "exitPrice": 0.851718,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2020-10-20",
+   "entryPrice": 0.85975707,
+   "exitDate": "2020-11-15",
+   "exitPrice": 0.8619224,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2020-11-27",
+   "entryPrice": 0.87607499,
+   "exitDate": "2020-12-01",
+   "exitPrice": 0.86471287,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2020-12-07",
+   "entryPrice": 0.87584704,
+   "exitDate": "2021-01-04",
+   "exitPrice": 0.87661596,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2021-02-21",
+   "entryPrice": 0.86727943,
+   "exitDate": "2021-03-06",
+   "exitPrice": 0.85699222,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2021-08-17",
+   "entryPrice": 0.67521054,
+   "exitDate": "2021-08-28",
+   "exitPrice": 0.66955892,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2021-09-17",
+   "entryPrice": 0.66570742,
+   "exitDate": "2021-10-21",
+   "exitPrice": 0.6780679,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2021-10-27",
+   "entryPrice": 0.69014615,
+   "exitDate": "2021-11-11",
+   "exitPrice": 0.68745284,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2021-12-01",
+   "entryPrice": 0.69630982,
+   "exitDate": "2021-12-24",
+   "exitPrice": 0.6950356,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2021-12-28",
+   "entryPrice": 0.71432088,
+   "exitDate": "2022-01-01",
+   "exitPrice": 0.69788091,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2022-01-21",
+   "entryPrice": 0.69749604,
+   "exitDate": "2022-02-25",
+   "exitPrice": 0.68983672,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2022-05-14",
+   "entryPrice": 0.63624581,
+   "exitDate": "2022-08-09",
+   "exitPrice": 0.68127583,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2022-08-11",
+   "entryPrice": 0.68672248,
+   "exitDate": "2022-09-09",
+   "exitPrice": 0.70165878,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2022-09-17",
+   "entryPrice": 0.71396379,
+   "exitDate": "2022-10-15",
+   "exitPrice": 0.71322225,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-01-07",
+   "entryPrice": 0.67488252,
+   "exitDate": "2023-01-20",
+   "exitPrice": 0.66312751,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-01-23",
+   "entryPrice": 0.67078059,
+   "exitDate": "2023-02-04",
+   "exitPrice": 0.66786975,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-02-21",
+   "entryPrice": 0.67231023,
+   "exitDate": "2023-03-13",
+   "exitPrice": 0.66399299,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-04-14",
+   "entryPrice": 0.64631927,
+   "exitDate": "2023-04-20",
+   "exitPrice": 0.6348928,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-05-02",
+   "entryPrice": 0.64389708,
+   "exitDate": "2023-05-04",
+   "exitPrice": 0.63485058,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-05-19",
+   "entryPrice": 0.64406606,
+   "exitDate": "2023-06-15",
+   "exitPrice": 0.64544244,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-06-26",
+   "entryPrice": 0.65511014,
+   "exitDate": "2023-08-12",
+   "exitPrice": 0.67981246,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-08-19",
+   "entryPrice": 0.69693134,
+   "exitDate": "2023-09-11",
+   "exitPrice": 0.69445122,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-10-21",
+   "entryPrice": 0.66954785,
+   "exitDate": "2023-10-24",
+   "exitPrice": 0.65913899,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-10-26",
+   "entryPrice": 0.67327672,
+   "exitDate": "2023-11-08",
+   "exitPrice": 0.66984656,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-11-11",
+   "entryPrice": 0.68250154,
+   "exitDate": "2023-11-20",
+   "exitPrice": 0.67530642,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-11-21",
+   "entryPrice": 0.68195361,
+   "exitDate": "2023-11-24",
+   "exitPrice": 0.67615369,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-11-30",
+   "entryPrice": 0.6810336,
+   "exitDate": "2023-12-11",
+   "exitPrice": 0.67202493,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2023-12-30",
+   "entryPrice": 0.67380592,
+   "exitDate": "2024-01-03",
+   "exitPrice": 0.6680632,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2024-01-09",
+   "entryPrice": 0.68280344,
+   "exitDate": "2024-01-16",
+   "exitPrice": 0.67179304,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2024-01-30",
+   "entryPrice": 0.68061362,
+   "exitDate": "2024-02-06",
+   "exitPrice": 0.66528703,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2024-02-13",
+   "entryPrice": 0.67684022,
+   "exitDate": "2024-04-04",
+   "exitPrice": 0.71872147,
+   "reason": "signal"
+  },
+  {
+   "entryDate": "2024-04-15",
+   "entryPrice": 0.73042695,
+   "exitDate": "2024-05-01",
+   "exitPrice": 0.72254486,
+   "reason": "signal"
+  }
+ ],
+ "open": [
+  {
+   "entryDate": "2024-05-08",
+   "entryPrice": 0.74385212
+  }
+ ]
+}

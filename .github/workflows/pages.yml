@@ -1,0 +1,54 @@
+name: deploy-site
+
+# 把 site/ 部署成公開網站(GitHub Pages),並在部署前抓最新的價格資料。
+#
+# 第一次啟用: Settings → Pages → Build and deployment → Source 選「GitHub Actions」。
+# 之後 push 到 main(動到網站或抓資料的檔案)、每天一次、或在 Actions 頁面手動執行,都會重新部署。
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths: ["site/**", "tools/fetch_prices.py", "tools/universe.json", ".github/workflows/pages.yml"]
+  schedule:
+    - cron: "15 23 * * *"     # 每天一次,美股、台股收盤後,加密貨幣也已有當日資料
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一時間只部署一次;不取消進行中的部署
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install requests
+
+      # 失敗(通過品質檢查的標的不到一半)時這個步驟會讓整個 workflow 失敗,
+      # 已經發布的網站維持上一次的版本,不會被空資料取代。
+      - name: Fetch prices (with data-quality gate)
+        run: python tools/fetch_prices.py --out site/data
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
