@@ -2,7 +2,8 @@ name: probe-sources
 
 # 臨時: 看哪些公開的資料來源從 GitHub 的 runner 連得到(用來挑獨立的交叉驗證來源)。確認後會刪除。
 on:
-  workflow_dispatch: {}
+  push:
+    branches: [claude/probe-sources]
 
 permissions:
   contents: read
