@@ -304,11 +304,11 @@ node tools/serve.mjs site 8080                  # 開 http://127.0.0.1:8080/
 ## 測試
 
 ```bash
-npm test                                   # 181 個:指標、解析器、回測、投資組合、績效、CSV、當沖引擎、盤中 K 線、.npz、目標權重帳戶、對 Python 實作的一致性
+npm test                                   # 229 個:指標、解析器、回測、投資組合、績效、CSV、當沖引擎、盤中 K 線、.npz、目標權重帳戶、對 Python 實作的一致性
 pip install -r requirements-dev.txt
 python -m pytest                           # 60 個:資料管線、獨立驗證工具、部署設定、Python 策略執行器
 npm i --no-save playwright && npx playwright install chromium
-node --test tests-js/e2e/*.test.mjs        # 44 個:在真實 Chromium 裡操作網站(用合成資料)
+node --test tests-js/e2e/*.test.mjs        # 58 個:在真實 Chromium 裡操作網站(用合成資料)
 ```
 
 目標權重的帳戶運算用手算案例(融資利息、現金利息、借券費、再平衡帶、爆倉)與「帳戶恆等式」性質測試(每天淨值變化 = 隔夜損益 + 盤中損益 + 利息收支 − 成本)驗證,並做過突變測試(故意改壞 17 種做法,只有 1 個等價的沒被擋下)。
