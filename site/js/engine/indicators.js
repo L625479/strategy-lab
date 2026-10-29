@@ -120,6 +120,33 @@ export const stdev = (src, length) => rolling(src, length, (w) => {
   return Math.sqrt(w.reduce((a, b) => a + (b - m) ** 2, 0) / w.length);
 });
 
+/** 樣本標準差(分母 n-1,和 pandas 的 .std() 一致);stdev 是母體標準差(同 Pine) */
+export const std = (src, length) => rolling(src, length, (w) => {
+  const m = w.reduce((a, b) => a + b, 0) / w.length;
+  return w.length > 1 ? Math.sqrt(w.reduce((a, b) => a + (b - m) ** 2, 0) / (w.length - 1)) : NaN;
+});
+
+export const sum = (src, length) => rolling(src, length, (w) => w.reduce((a, b) => a + b, 0));
+
+/** 從第一個有效值起的累計平均(擴張視窗) */
+export function cummean(src) {
+  const out = makeSeries(src.length);
+  let total = 0, count = 0;
+  for (let i = 0; i < src.length; i++) {
+    if (!Number.isNaN(src[i])) { total += src[i]; count++; }
+    if (count) out[i] = total / count;
+  }
+  return out;
+}
+
+/** 簡單報酬 x / x[n] - 1 */
+export function ret(src, length = 1) {
+  const k = Math.floor(length), out = makeSeries(src.length);
+  if (!(k >= 1)) return out;
+  for (let i = k; i < src.length; i++) out[i] = src[i] / src[i - k] - 1;
+  return out;
+}
+
 export function crossover(a, b) {
   const n = a.length, out = makeSeries(n, 0);
   for (let i = 1; i < n; i++) out[i] = a[i] > b[i] && a[i - 1] <= b[i - 1] ? 1 : 0;
@@ -170,6 +197,15 @@ const binary = (a, b, fn) => {
   return out;
 };
 
+/** 把「純量函式」提升成「數字或序列」都能吃的函式(有任何一個序列參數,結果就是序列) */
+const lift = (f) => (...args) => {
+  const n = args.find((a) => typeof a !== 'number')?.length;
+  if (n === undefined) return f(...args);
+  const out = makeSeries(n);
+  for (let i = 0; i < n; i++) out[i] = f(...args.map((a) => (typeof a === 'number' ? a : a[i])));
+  return out;
+};
+
 /**
  * 規則語法可呼叫的函式表。每個函式: { fn, min, max, doc }。
  * atr() 需要 OHLC,所以用閉包綁定當前標的的資料。
@@ -202,6 +238,18 @@ export function makeFunctions(bars) {
     crossunder: def(2, 2, 'crossunder(a, b) a 由上往下穿越 b', two(crossunder), 'all'),
     cross_above: def(2, 2, 'cross_above(a, b) 同 crossover', two(crossover), 'all'),
     cross_below: def(2, 2, 'cross_below(a, b) 同 crossunder', two(crossunder), 'all'),
+    std: def(2, 2, 'std(來源, 週期) 樣本標準差(n-1;stdev 是母體標準差)', (s, k) => std(S(s), k)),
+    sum: def(2, 2, 'sum(來源, 週期) 區間加總', (s, k) => sum(S(s), k)),
+    cummean: def(1, 1, 'cummean(來源) 從第一個有效值起的累計平均', (s) => cummean(S(s))),
+    ret: def(1, 2, 'ret(來源[, 期數]) 簡單報酬 x / x[n] - 1', (s, k = 1) => ret(S(s), k)),
+    sqrt: def(1, 1, 'sqrt(x) 平方根', lift(Math.sqrt), 'all'),
+    log: def(1, 1, 'log(x) 自然對數', lift(Math.log), 'all'),
+    exp: def(1, 1, 'exp(x) 指數', lift(Math.exp), 'all'),
+    sign: def(1, 1, 'sign(x) 正負號(-1 / 0 / 1)', lift(Math.sign), 'all'),
+    pow: def(2, 2, 'pow(a, b) a 的 b 次方', lift(Math.pow), 'all'),
+    clip: def(3, 3, 'clip(x, 下限, 上限) 夾在區間內', lift((x, lo, hi) => (x < lo ? lo : x > hi ? hi : x)), 'all'),
+    ifelse: def(3, 3, 'ifelse(條件, a, b) 條件為真取 a、否則取 b(條件是 NaN 則為 NaN)', lift((c, a, b) => (c !== c ? NaN : (c !== 0 ? a : b))), 'all'),
+    avg: def(2, 24, 'avg(a, b, …) 平均(只要有一個是 NaN 結果就是 NaN)', lift((...v) => v.reduce((a, b) => a + b, 0) / v.length), 'all'),
     abs: def(1, 1, 'abs(x) 絕對值', (x) => (typeof x === 'number' ? Math.abs(x) : x.map(Math.abs)), 'all'),
     max: def(2, 2, 'max(a, b) 取大', (a, b) => (typeof a === 'number' && typeof b === 'number' ? Math.max(a, b) : binary(a, b, Math.max)), 'all'),
     min: def(2, 2, 'min(a, b) 取小', (a, b) => (typeof a === 'number' && typeof b === 'number' ? Math.min(a, b) : binary(a, b, Math.min)), 'all'),

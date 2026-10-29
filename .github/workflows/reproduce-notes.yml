@@ -1,0 +1,29 @@
+name: reproduce-notes
+
+# 唯讀: 抓最新的真實價格,用目標權重引擎重現研究筆記裡記載的結果,並排印出來。只印出差距,不判定通過與否。
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [claude/target-weights]
+    paths: ["site/js/engine/weights*.js", "tools/reproduce_notes.mjs", ".github/workflows/reproduce-notes.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install requests
+      - name: Fetch real prices
+        run: python tools/fetch_prices.py --out /tmp/data
+      - name: Reproduce the numbers in the research notes
+        run: node tools/reproduce_notes.mjs /tmp/data
