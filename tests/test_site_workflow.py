@@ -32,3 +32,13 @@ def test_pages_workflow_permissions_and_steps():
 
 def test_site_data_directory_is_not_committed():
     assert re.search(r"^site/data/$", Path(".gitignore").read_text(encoding="utf-8"), re.M)
+
+
+def test_verify_data_workflow_is_manual_and_read_only():
+    wf = yaml.safe_load(Path(".github/workflows/verify-data.yml").read_text(encoding="utf-8"))
+    triggers = wf.get("on", wf.get(True))
+    assert list(triggers) == ["workflow_dispatch"]
+    assert wf["permissions"] == {"contents": "read"}
+    commands = " ".join(s.get("run", "") for s in wf["jobs"]["verify"]["steps"])
+    assert "fetch_prices.py" in commands and "verify_prices.py" in commands
+    assert "git push" not in commands and "git commit" not in commands

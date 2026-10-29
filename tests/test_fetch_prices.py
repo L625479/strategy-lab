@@ -211,6 +211,7 @@ def test_main_writes_prices_and_universe_and_excludes_bad_symbols(tmp_path):
     code, out = run_main(tmp_path, ["SPY", "2330.TW", "BTC-USD", "FAKE", "BROKEN"], by)
     assert code == 0
     uni = json.loads((out / "universe.json").read_text(encoding="utf-8"))
+    assert uni["source"].startswith("Yahoo Finance")                              # 網站頁尾會顯示資料來源
     assert [a["id"] for a in uni["assets"]] == ["SPY", "2330.TW", "BTC-USD"]
     assert {s["id"] for s in uni["skipped"]} == {"FAKE", "BROKEN"}
     assert uni["assets"][1]["name"] == "名稱 2330.TW" and uni["assets"][0]["n"] > 300

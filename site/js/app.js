@@ -89,7 +89,7 @@ async function loadUniverse() {
     const res = await fetch('data/universe.json', { cache: 'no-cache' });
     if (!res.ok) return { assets: [], updated: null };
     const json = await res.json();
-    return { updated: json.updated || null, assets: (json.assets || []).map((a) => ({ id: a.id, name: a.name || a.id, category: a.category || '其他', first: a.first, last: a.last, n: a.n, warn: a.warn || '' })) };
+    return { updated: json.updated || null, source: json.source || '', assets: (json.assets || []).map((a) => ({ id: a.id, name: a.name || a.id, category: a.category || '其他', first: a.first, last: a.last, n: a.n, warn: a.warn || '' })) };
   } catch { return { assets: [], updated: null }; }
 }
 
@@ -172,7 +172,7 @@ for (const [key, [btn]] of Object.entries(TABS)) btn.addEventListener('click', (
 
 async function boot() {
   renderEmpty(resultsMount, false);
-  const [{ assets, updated }, saved] = await Promise.all([loadUniverse(), listUserSeries()]);
+  const [{ assets, updated, source }, saved] = await Promise.all([loadUniverse(), listUserSeries()]);
   const mine = saved.map((s) => {
     const bars = toBars(s);
     priceCache.set(s.id, bars);
@@ -180,7 +180,7 @@ async function boot() {
     return { id: s.id, name: s.name || s.id, category: '我的資料', first: bars.d[0], last: bars.d.at(-1), n: bars.n, warn: s.meta?.warn || '' };
   });
   targets.setAssets([...mine, ...assets]);
-  if (updated) $('footer')?.append(h('p', null, `內建行情資料更新於 ${updated}(調整後價格,日線)。`));
+  if (updated) $('footer')?.append(h('p', null, `內建行情資料${source ? `來源: ${source},` : ''}更新於 ${updated}(調整後價格,日線),由部署流程在每次發布時重新抓取;網站上沒有任何手寫或模擬的行情。你上傳的資料則完全是你自己的檔案。`));
 
   // 還原順序: 分享連結 > 上次的工作 > 預設範本
   let from = null;

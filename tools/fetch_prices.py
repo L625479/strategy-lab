@@ -190,7 +190,7 @@ def main(argv=None, session=None, now=None, sleep=time.sleep):
               f"{'  ⚠ ' + warn if warn else ''}  (修正 {stats['repaired']}、空值 {stats['null']})")
 
     (out / "universe.json").write_text(json.dumps(
-        {"updated": now.strftime("%Y-%m-%d %H:%M UTC"), "assets": assets, "skipped": skipped}, ensure_ascii=False, indent=1), encoding="utf-8")
+        {"updated": now.strftime("%Y-%m-%d %H:%M UTC"), "source": "Yahoo Finance(非官方 API)", "assets": assets, "skipped": skipped}, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"完成: 收錄 {len(assets)} / {len(universe)},排除 {len(skipped)}")
     if len(assets) < len(universe) * MIN_OK_FRACTION:
         print("通過品質檢查的標的不到一半,視為失敗(保留上一次發布的網站)", file=sys.stderr)

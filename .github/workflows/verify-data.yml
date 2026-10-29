@@ -1,0 +1,29 @@
+name: verify-data
+
+# 唯讀、手動執行: 抓一次最新價格,再用另一個獨立來源(Stooq)交叉驗證。
+# 比較每天的「日內報酬」與「振幅」(不受股利調整影響);對不上或來源取不到資料,這個 workflow 都會變紅。
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install requests
+
+      - name: Fetch prices (same command the deploy uses)
+        run: python tools/fetch_prices.py --out /tmp/data
+
+      - name: Cross-check against an independent source
+        run: python tools/verify_prices.py --data /tmp/data
