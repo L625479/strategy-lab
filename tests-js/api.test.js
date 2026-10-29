@@ -165,6 +165,15 @@ test('search: 回傳整理過的結果;空的或太長的文字被擋下;搜尋�
   assert.equal((await get('/api/nope')).status, 404);
 });
 
+test('search: 中文(非 ASCII)不送給 Yahoo,直接說明(實測 Yahoo 的搜尋對中文一律回 400)', async () => {
+  const { get, calls } = await boot(() => ({ status: 400 }));
+  const r = await get(`/api/search?q=${encodeURIComponent('台積電')}`);
+  assert.equal(r.status, 422);
+  assert.match(r.body.error, /不支援中文.*TSMC.*2330\.TW/);
+  assert.equal((await get('/api/search?q=caf%C3%A9')).status, 422, '任何非 ASCII 字元');
+  assert.equal(calls.length, 0);
+});
+
 test('search: Yahoo 出錯時回傳可讀的錯誤(限流是 503,其餘 502)', async () => {
   const { get } = await boot((url) => (new URL(url).searchParams.get('q') === 'limit' ? { status: 429 } : { status: 500 }));
   assert.equal((await get('/api/search?q=limit')).status, 503);

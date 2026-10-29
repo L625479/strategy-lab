@@ -150,6 +150,18 @@ test('目標權重與當沖掃描分頁也看得到下載的標的', async () =>
   await context.close();
 });
 
+test('中文搜尋: 不送出請求,直接說明改用英文名稱或代號;代號數字(2330)照樣可以搜', async () => {
+  const { page, context } = await open(withApi);
+  await ready(page);
+  const before = yahoo.calls.length;
+  await search(page).fill('台積電');
+  await page.waitForSelector('[data-testid=net-results] .field-error');
+  assert.match(await page.textContent('[data-testid=net-results]'), /不支援中文.*TSMC.*2330\.TW/);
+  await page.waitForTimeout(700);                                       // 超過搜尋的去抖動時間
+  assert.equal(yahoo.calls.length, before, '沒有送出任何請求');
+  await context.close();
+});
+
 test('手機寬度: 搜尋結果與下載訊息不會讓頁面橫向溢出', async () => {
   const { page, context } = await open(withApi, { viewport: { width: 390, height: 800 } });
   await ready(page);

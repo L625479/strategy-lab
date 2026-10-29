@@ -3,6 +3,8 @@
 import { clear, h } from './dom.js';
 
 const SYMBOL_RE = /^[A-Za-z0-9^.=\-]{1,20}$/;      // 和 tools/yahoo.mjs 的 SYMBOL_RE 相同
+const NON_ASCII = /[^\u0000-\u007f]/;
+const NON_ASCII_SEARCH = 'Yahoo 的搜尋不支援中文。請輸入英文名稱(例如 TSMC、Taiwan Semiconductor)或代號(例如 2330 或 2330.TW)。';   // 和 tools/api.mjs 相同
 export const MAX_ASSETS = 8; // 圖表的類別色票只有 8 個固定順序的槽位,所以組合上限 8 檔
 
 const PRESETS = [['近 1 年', 1], ['近 3 年', 3], ['近 5 年', 5], ['近 10 年', 10], ['全部', 0]];
@@ -133,6 +135,7 @@ export function createTargets(mount, {
     net.results = []; net.error = ''; net.loading = false;
     const q = query.trim();
     if (!net.on || q.length < 2) return;
+    if (NON_ASCII.test(q)) { net.error = NON_ASCII_SEARCH; return; }                  // 不必送出去: Yahoo 的搜尋對中文一律 400
     net.loading = true;
     const seq = searchSeq;
     searchTimer = setTimeout(async () => {

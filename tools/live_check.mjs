@@ -70,7 +70,11 @@ try {
   else {
     check(s1.body.some((x) => x.symbol === 'AAPL' && x.type === '股票'), '/api/search?q=apple 含 AAPL(股票)', JSON.stringify(s1.body.slice(0, 4)));
     const s2 = await api(`/api/search?q=${encodeURIComponent('台積電')}`);
-    results.push(`INFO /api/search?q=台積電 → ${s2.status} ${JSON.stringify(s2.body)}`);
+    check(s2.status === 422 && /不支援中文/.test(s2.body?.error || ''), '/api/search?q=台積電: 說明 Yahoo 搜尋不支援中文(不送出請求)', `${s2.status} ${s2.body?.error}`);
+    const s4 = await api('/api/search?q=2330');
+    check(s4.status === 200 && s4.body[0]?.symbol === '2330.TW', '/api/search?q=2330 第一筆是 2330.TW', JSON.stringify(s4.body?.slice?.(0, 2)));
+    const s5 = await api('/api/search?q=taiwan%20semiconductor');
+    check(s5.status === 200 && s5.body.some((x) => x.symbol === 'TSM'), '/api/search?q=taiwan semiconductor 含 TSM', JSON.stringify(s5.body?.slice?.(0, 3)));
     const s3 = await api('/api/search?q=tesla');
     check(s3.status === 200 && s3.body.some((x) => x.symbol === 'TSLA'), '/api/search?q=tesla 含 TSLA', JSON.stringify(s3.body?.slice?.(0, 3)));
   }

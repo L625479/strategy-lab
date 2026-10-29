@@ -10,6 +10,7 @@ import { FetchError, SYMBOL_RE, loadSymbol, searchSymbols } from './yahoo.mjs';
 
 const HOST_RE = /^(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/;
 const HOUR = 3600e3;
+export const NON_ASCII_SEARCH = 'Yahoo 的搜尋不支援中文。請輸入英文名稱(例如 TSMC、Taiwan Semiconductor)或代號(例如 2330 或 2330.TW)。';
 
 function explain(err, symbol) {
   if (err instanceof FetchError) {
@@ -64,6 +65,7 @@ export function createApi({ fetchImpl = fetch, now = () => new Date(), sleep = (
       const q = (url.searchParams.get('q') || '').trim();
       // eslint-disable-next-line no-control-regex
       if (!q || q.length > 60 || /[\u0000-\u001f\u007f]/.test(q)) { send(res, 400, { error: '搜尋文字不能是空的,也不能超過 60 個字' }); return true; }
+      if (/[^\u0000-\u007f]/.test(q)) { send(res, 422, { error: NON_ASCII_SEARCH }); return true; }            // Yahoo 的搜尋對中文一律回 400(實測),不必送出去
       try { send(res, 200, await cached(`s|${q.toLowerCase()}`, searchTtlMs, () => searchSymbols(q, { fetchImpl }))); } catch (err) {
         const [status, message] = err instanceof FetchError
           ? (err.status === 429 ? [503, 'Yahoo 暫時限流(請求太頻繁),等一兩分鐘再試。'] : [502, `搜尋失敗: ${err.message}。可以直接輸入代號(例如 2330.TW)再按 Enter。`])
