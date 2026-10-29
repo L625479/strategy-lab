@@ -153,7 +153,7 @@ def main(argv=None, session=None, now=None, sleep=time.sleep):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--out", default="site/data")
     ap.add_argument("--universe", default=str(Path(__file__).with_name("universe.json")))
-    ap.add_argument("--years", type=float, default=12)
+    ap.add_argument("--years", type=float, default=26)
     ap.add_argument("--pause", type=float, default=0.6, help="每個標的之間的間隔秒數(降低被限流的機率)")
     args = ap.parse_args(argv)
 

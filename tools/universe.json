@@ -22,5 +22,16 @@
   {"id": "2412.TW", "name": "中華電", "category": "台股"},
   {"id": "BTC-USD", "name": "比特幣 (USD)", "category": "加密貨幣"},
   {"id": "ETH-USD", "name": "以太幣 (USD)", "category": "加密貨幣"},
+  {"id": "CVX", "name": "雪佛龍 (Chevron)", "category": "美股"},
+  {"id": "XOM", "name": "埃克森美孚 (Exxon Mobil)", "category": "美股"},
+  {"id": "JPM", "name": "摩根大通 (JPMorgan)", "category": "美股"},
+  {"id": "GOOG", "name": "Alphabet C 股 (Google)", "category": "美股"},
+  {"id": "AMAT", "name": "應用材料 (Applied Materials)", "category": "美股"},
+  {"id": "MU", "name": "美光 (Micron)", "category": "美股"},
+  {"id": "WMT", "name": "沃爾瑪 (Walmart)", "category": "美股"},
+  {"id": "SOXL", "name": "Direxion 3 倍做多半導體 ETF", "category": "槓桿 ETF"},
+  {"id": "^SOX", "name": "費城半導體指數", "category": "指數"},
+  {"id": "^IRX", "name": "美國 13 週國庫券利率 (%)", "category": "指數"},
+  {"id": "CL=F", "name": "WTI 原油期貨", "category": "債券 / 商品"},
   {"id": "^VIX", "name": "CBOE 波動率指數 (VIX)", "category": "指數"}
 ]
