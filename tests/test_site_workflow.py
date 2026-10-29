@@ -41,3 +41,11 @@ def test_verify_data_workflow_is_manual_and_read_only():
     commands = " ".join(s.get("run", "") for s in wf["jobs"]["verify"]["steps"])
     assert "fetch_prices.py" in commands and "verify_prices.py" in commands
     assert "git push" not in commands and "git commit" not in commands
+
+
+def test_live_fetch_check_workflow_is_read_only_and_runs_both_comparisons():
+    wf = yaml.safe_load(Path(".github/workflows/live-fetch-check.yml").read_text(encoding="utf-8"))
+    assert wf["permissions"] == {"contents": "read"}
+    commands = " ".join(s.get("run", "") for j in wf["jobs"].values() for s in j["steps"])
+    assert "live_dump_python.py" in commands and "live_check.mjs" in commands and "live_e2e.mjs" in commands
+    assert "git push" not in commands and "git commit" not in commands

@@ -1,0 +1,49 @@
+name: live-fetch-check
+
+# 用真實的 Yahoo 驗證「輸入代號自動下載」(唯讀,不發布任何東西):
+#   1. Node 版與 Python 版對同一批真實代號清理出的序列必須逐筆相同
+#   2. 真的本機伺服器的 /api/search、/api/prices
+#   3. 真的 Chromium 開網站: 搜尋 → 下載 → 回測 → 重新整理
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [claude/auto-fetch]
+    paths: ["tools/yahoo.mjs", "tools/api.mjs", "tools/serve.mjs", "tools/live_*", "site/js/engine/remote.js", "site/js/ui/targets.js", "site/js/app.js", ".github/workflows/live-fetch-check.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install requests
+      - name: Python 版抓取並清理
+        run: python tools/live_dump_python.py /tmp/py.json SPY AAPL ^GSPC BTC-USD 2330.TW CL=F EURUSD=X ^VIX GOOG
+      - name: Node 版對照 + 真的 /api
+        run: node tools/live_check.mjs /tmp/py.json
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm i --no-save playwright && npx playwright install --with-deps chromium
+      - name: 真的 Chromium + 真的 Yahoo
+        run: node tools/live_e2e.mjs /tmp/shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: /tmp/shots

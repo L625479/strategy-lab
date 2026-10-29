@@ -2,6 +2,7 @@
 
 import { toBars, cleanId, parseCsv, priceFileName } from './engine/data.js';
 import { runPortfolio } from './engine/portfolio.js';
+import { apiAvailable, downloadSeries, searchSymbols } from './engine/remote.js';
 import { compileStrategy, decodeShare, encodeShare, getTemplate } from './engine/strategy.js';
 import { $, debounce, h } from './ui/dom.js';
 import { createEditor } from './ui/editor.js';
@@ -74,12 +75,28 @@ async function onUpload(file) {
   userIds.add(id);
   const saved = await saveUserSeries(id, id, bars, { warn });
   if (!saved) notes.push('(瀏覽器封鎖了儲存空間,關掉頁面後需要重新上傳)');
-  return { asset: { id, name: file.name, category: '我的資料', first: bars.d[0], last: bars.d.at(-1), n: bars.n, warn }, message: notes.join(';') };
+  return { asset: { id, name: file.name, category: '我的資料', first: bars.d[0], last: bars.d.at(-1), n: bars.n, warn, removable: true }, message: notes.join(';') };
+}
+
+const SOURCE_LABEL = '已下載(Yahoo)';
+
+/** 輸入代號 → 由本機伺服器從 Yahoo 抓日線(調整後價格)、清理、檢查品質;存在這個瀏覽器裡,下次開啟還在。 */
+async function onDownload(symbol, { fresh = false } = {}) {
+  const { bars, info } = await downloadSeries(symbol, { fresh });
+  const id = info.symbol;
+  if (targets.asset(id) && !userIds.has(id)) throw new Error(`內建資料已經有 ${id},直接從清單選就好`);
+  priceCache.set(id, bars);
+  userIds.add(id);
+  const saved = await saveUserSeries(id, info.name, bars, { warn: info.warn, source: 'yahoo', updated: info.updated, currency: info.currency, exchange: info.exchange });
+  const notes = [`已${fresh ? '更新' : '下載'} ${id}(${info.name}): ${bars.n.toLocaleString('en-US')} 根日線 ${bars.d[0]} ~ ${bars.d.at(-1)},調整後價格,來源 Yahoo Finance`];
+  if (info.warn) notes.push(`⚠ ${info.warn}`);
+  if (!saved) notes.push('(瀏覽器封鎖了儲存空間,關掉頁面後需要重新下載)');
+  return { asset: { id, name: info.name, category: SOURCE_LABEL, first: bars.d[0], last: bars.d.at(-1), n: bars.n, warn: info.warn, removable: true, source: 'yahoo', updated: info.updated }, message: notes.join(';') };
 }
 
 const targets = createTargets(targetsMount, {
   onChange: persist,
-  onUpload,
+  onUpload, onDownload, onSearch: (q) => searchSymbols(q),
   onRemove: async (id) => { userIds.delete(id); priceCache.delete(id); await deleteUserSeries(id); targets.removeAsset(id); },
 });
 
@@ -179,12 +196,14 @@ for (const [key, [btn]] of Object.entries(TABS)) btn.addEventListener('click', (
 
 async function boot() {
   renderEmpty(resultsMount, false);
+  apiAvailable({ marked: Boolean(document.querySelector('meta[name="strategy-lab-api"]')) }).then((ok) => targets.setNetwork(ok));        // 有沒有「輸入代號自動下載」(要用 node tools/serve.mjs 啟動)
   const [{ assets, updated, source }, saved] = await Promise.all([loadUniverse(), listUserSeries()]);
   const mine = saved.map((s) => {
     const bars = toBars(s);
     priceCache.set(s.id, bars);
     userIds.add(s.id);
-    return { id: s.id, name: s.name || s.id, category: '我的資料', first: bars.d[0], last: bars.d.at(-1), n: bars.n, warn: s.meta?.warn || '' };
+    const yahoo = s.meta?.source === 'yahoo';
+    return { id: s.id, name: s.name || s.id, category: yahoo ? SOURCE_LABEL : '我的資料', first: bars.d[0], last: bars.d.at(-1), n: bars.n, warn: s.meta?.warn || '', removable: true, ...(yahoo ? { source: 'yahoo', updated: s.meta?.updated || '' } : {}) };
   });
   targets.setAssets([...mine, ...assets]);
   if (updated) $('footer')?.append(h('p', null, `內建行情資料${source ? `來源: ${source},` : ''}更新於 ${updated}(調整後價格,日線),由部署流程在每次發布時重新抓取;網站上沒有任何手寫或模擬的行情。你上傳的資料則完全是你自己的檔案。`));

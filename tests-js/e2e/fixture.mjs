@@ -58,3 +58,45 @@ export function buildSite({ withData = true } = {}) {
   }
   return dir;
 }
+
+/**
+ * 假的 Yahoo(給 /api 注入 fetchImpl 用;不連網,資料是合成的): 每個代號一條亂數行情,最後一根在三天前。
+ * 特殊代號: ZZZZ = 找不到(404)、LIMIT = 限流(429)、STALE = 收盤價疑似過期(會被品質檢查拒絕)、SHORT = 只有 60 根。
+ */
+export function mockYahoo() {
+  const calls = [];
+  const hash = (s) => [...s].reduce((a, ch) => (Math.imul(a, 31) + ch.charCodeAt(0)) >>> 0, 7);
+  function chart(symbol) {
+    const rand = rng(hash(symbol)), gauss = () => Math.sqrt(-2 * Math.log(rand() + 1e-12)) * Math.cos(2 * Math.PI * rand());
+    const n = symbol === 'SHORT' ? 60 : 800;
+    const ts = [], o = [], h = [], l = [], c = [], v = [];
+    const end = Date.now() - 3 * 86400000;
+    const days = [];
+    for (let t = end; days.length < n; t -= 86400000) { const d = new Date(t).getUTCDay(); if (d !== 0 && d !== 6) days.push(t); }
+    days.reverse();
+    let price = 50 + rand() * 200;
+    days.forEach((t, i) => {
+      const op = price, cl = symbol === 'STALE' && i % 2 === 0 ? op : op * (1 + 0.0004 + 0.014 * gauss());
+      ts.push(Math.floor(t / 1000)); o.push(+op.toFixed(4)); c.push(+cl.toFixed(4));
+      h.push(+(Math.max(op, cl) * 1.004).toFixed(4)); l.push(+(Math.min(op, cl) * 0.996).toFixed(4)); v.push(1000000 + i);
+      price = cl;
+    });
+    return { chart: { error: null, result: [{ meta: { gmtoffset: 0, symbol, shortName: `${symbol} Inc.`, currency: 'USD', fullExchangeName: 'NasdaqGS', instrumentType: 'EQUITY' }, timestamp: ts, indicators: { quote: [{ open: o, high: h, low: l, close: c, volume: v }], adjclose: [{ adjclose: c }] } }] } };
+  }
+  const fetchImpl = async (url) => {
+    const u = new URL(String(url));
+    calls.push(String(url));
+    const reply = (status, body) => ({ status, json: async () => body });
+    if (u.pathname.startsWith('/v1/finance/search')) {
+      const q = (u.searchParams.get('q') || '').toLowerCase();
+      const quotes = q.includes('apple') ? [{ symbol: 'AAPL', quoteType: 'EQUITY', longname: 'Apple Inc.', exchDisp: 'NASDAQ' }, { symbol: 'AAPL.MX', quoteType: 'EQUITY', shortname: 'APPLE INC.', exchDisp: 'Mexico' }]
+        : q.includes('tesla') ? [{ symbol: 'TSLA', quoteType: 'EQUITY', longname: 'Tesla, Inc.', exchDisp: 'NASDAQ' }] : [];
+      return reply(200, { quotes });
+    }
+    const symbol = decodeURIComponent(u.pathname.split('/').pop());
+    if (symbol === 'ZZZZ') return reply(404, { chart: { result: null, error: { code: 'Not Found', description: 'No data found, symbol may be delisted' } } });
+    if (symbol === 'LIMIT') return reply(429, null);
+    return reply(200, chart(symbol));
+  };
+  return { fetchImpl, calls };
+}
