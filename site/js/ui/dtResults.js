@@ -7,19 +7,19 @@ import { h, isNum, num, pct, signClass } from './dom.js';
 
 const CAND_LABEL = { pass: '通過 D1–D3', a: '(a) 勝率過門檻', b: '(b) 平均過門檻', c: '(c) 最接近雙重目標' };
 
-const card = (title, { actions = null, legend = null } = {}, ...body) => h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, title), legend, actions), ...body);
+export const card = (title, { actions = null, legend = null } = {}, ...body) => h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', null, title), legend, actions), ...body);
 const thr = (s) => ({ ...DEFAULTS, ...s });
 
-function badge(ok, label) {
+export function badge(ok, label) {
   return h('span', { class: 'tag', style: { color: ok ? 'var(--good)' : 'var(--bad)', fontWeight: 600 }, title: ok ? '通過' : '未通過' }, `${ok ? '✓' : '✗'} ${label}`);
 }
 
-function flags(s, t) {
+export function flags(s, t) {
   const p = passes(s, t);
   return h('span', { class: 'row', style: { gap: '4px', justifyContent: 'flex-end' } }, badge(p.D1, 'D1'), badge(p.D2, 'D2'), badge(p.D3, 'D3'));
 }
 
-const fmtN = (n) => n.toLocaleString('en-US');
+export const fmtN = (n) => n.toLocaleString('en-US');
 
 // ---- 小區塊 ---------------------------------------------------------------------
 
@@ -27,17 +27,18 @@ function criteriaLine(t) {
   return `D1 勝率 > ${pct(t.winThreshold, 0)}　D2 平均每筆淨報酬 ≥ ${pct(t.meanThreshold, 1)}　D3 > ${pct(t.passShare, 0)} 的個股「各自」勝率與平均都達標`;
 }
 
-export function summaryCard(scan, t) {
+const LIMIT_ILLUSION = (opt, cons) => `樂觀算法下有 ${opt} 條「全過」,保守算法只有 ${cons} 條。差距來自限價單:最高價可能出現在成交「之前」,樂觀算法把它算成停利。這類結果多半是假象,正式數字看保守。`;
+
+/** illusion: (樂觀全過數, 保守全過數) => 說明文字;盤中驗證的成因不同(同一根 K 棒裡的先後),由呼叫端換掉 */
+export function summaryCard(scan, t, { illusion = LIMIT_ILLUSION, title = '掃描結果' } = {}) {
   const hasOpt = scan.rules[0]?.opt;
   const rows = [['保守(正式數字)', summarize(scan.rules, (r) => r.cons, t)]];
   if (hasOpt) rows.push(['樂觀(上界,僅供參考)', summarize(scan.rules, (r) => r.opt, t)]);
   const tbl = h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' },
     h('thead', null, h('tr', null, h('th', null, '成交算法'), ['D1 勝率過', 'D2 平均過', 'D1+D2 同時過', 'D3 個股達標過', '全過'].map((x) => h('th', null, x)))),
     h('tbody', null, rows.map(([label, s]) => h('tr', null, h('td', { class: 'left' }, label), [s.D1, s.D2, s.D1D2, s.D3, s.all].map((v, i) => h('td', { class: i === 4 && v ? 'pos' : '' }, `${v} / ${s.total}`)))))));
-  const illusion = hasOpt && rows[1][1].all > rows[0][1].all
-    ? h('div', { class: 'notice' }, `樂觀算法下有 ${rows[1][1].all} 條「全過」,保守算法只有 ${rows[0][1].all} 條。差距來自限價單:最高價可能出現在成交「之前」,樂觀算法把它算成停利。這類結果多半是假象,正式數字看保守。`)
-    : null;
-  return card('掃描結果', {}, h('p', { class: 'hint' }, criteriaLine(t)), tbl, illusion);
+  const note = hasOpt && rows[1][1].all > rows[0][1].all ? h('div', { class: 'notice' }, illusion(rows[1][1].all, rows[0][1].all)) : null;
+  return card(title, {}, h('p', { class: 'hint' }, criteriaLine(t)), tbl, note);
 }
 
 export function candidatesCard(scan, t, { onSelect, selected }) {

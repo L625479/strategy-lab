@@ -5,8 +5,10 @@ import {
   DEFAULTS, compileGrid, emptyDayRule, emptyGrid, normalizeDayRule, normalizeGrid, ruleToGrid, standardGrid,
 } from '../engine/daytrade.js';
 import { parseCsv, cleanId } from '../engine/data.js';
+import { confirmKeys } from '../engine/intraday.js';
 import { BUILTIN_SERIES, makeFunctions } from '../engine/indicators.js';
 import { candidatesCard, detailCard, frontierCard, rulesCard, scatterCard, summaryCard } from './dtResults.js';
+import { ILLUSION, confirmCard, confirmCsv, intradayDetailCard, liveCard } from './dtIntraday.js';
 import { createRunner } from './dtRunner.js';
 import { $$, clear, download, h, pct, safeFilename } from './dom.js';
 
@@ -41,7 +43,7 @@ const SMALL_GRID = normalizeGrid({
   exits: [{ name: 'close', expr: '' }, { name: 'tp1atr', expr: 'atrp' }, { name: 'tp1%', expr: '0.01' }],
 });
 
-const DEFAULT_SETTINGS = { costBps: 5, bufferBps: 10, winPct: 80, meanPct: 1, sharePct: 50, devMin: 30, holdMin: 8, optimistic: true, splitDate: '' };
+const DEFAULT_SETTINGS = { costBps: 5, bufferBps: 10, winPct: 80, meanPct: 1, sharePct: 50, devMin: 30, holdMin: 8, intraMin: 5, optimistic: true, splitDate: '' };
 const AUX_TICKERS = new Set(['^VIX']);
 
 // ---- 主程式 --------------------------------------------------------------------------
@@ -57,9 +59,11 @@ export function createDayTrade({ panelMount, resultsMount, getAssets, getBars, t
     gridText: typeof saved.gridText === 'string' ? saved.gridText : JSON.stringify(standardGrid(), null, 1),
     settings: { ...DEFAULT_SETTINGS, ...(saved.settings || {}) },
     info: null, loading: '', running: false,
+    intra: { '60m': null, '5m': null }, intraLoading: '', intraError: '', view: 'daily',
   };
-  let run = null;                                              // 最近一次掃描: { cfg, scan, selected, detail, holdouts, view }
-  let dataMount, ruleMount, settingsMount, runBtn;
+  let run = null;                                              // 最近一次日線掃描: { cfg, scan, selected, detail, holdouts, view }
+  let irun = null;                                             // 最近一次盤中掃描: { cfg, scan, selected, confirm, seconds, view }
+  let dataMount, ruleMount, settingsMount, runBtn, runIntraBtn;
 
   const persist = () => write(STORE, { source: st.source, picked: [...st.picked], mode: st.mode, rule: st.rule, gridText: st.gridText, settings: st.settings });
 
@@ -81,7 +85,9 @@ export function createDayTrade({ panelMount, resultsMount, getAssets, getBars, t
       st.info = await promise;
       st.info.label = label;
       if (!st.settings.splitDate || st.settings.splitDate <= st.info.first || st.settings.splitDate > st.info.last) st.settings.splitDate = defaultSplit(st.info);
-      run = null; renderResults(); renderSettings();
+      run = null; irun = null; st.view = 'daily';
+      await refreshIntra();                                    // 盤中檔要重新對齊到新的面板
+      renderResults(); renderSettings();
       toast(`已載入 ${st.info.tickers} 檔 · ${st.info.first} ~ ${st.info.last}`);
     } catch (err) { st.info = null; toast(`載入失敗: ${err.message}`); st.loadError = err.message; }
     st.loading = ''; renderData(); persist();
@@ -127,6 +133,49 @@ export function createDayTrade({ panelMount, resultsMount, getAssets, getBars, t
     await loadInfo(runner.call('loadBars', { entries, aux: {} }), `CSV ${entries.length} 檔`);
   }
 
+  // ---- 盤中 K 線檔 ----
+
+  async function refreshIntra() {
+    try { st.intra = await runner.call('intradayInfo', {}); } catch { /* 沒有就維持原狀 */ }
+  }
+
+  async function loadIntradayFile(file, interval) {
+    if (file.size > 400 * 1024 * 1024) { toast('檔案超過 400 MB'); return; }
+    st.intraError = ''; st.intraLoading = interval; renderData();
+    try {
+      st.intra[interval] = await runner.call('loadIntraday', { buffer: await file.arrayBuffer(), interval });
+      if (interval === '60m') { irun = null; if (st.view === 'intraday') { st.view = 'daily'; renderResults(); } }      // 掃描的資料換了
+      else if (irun) { irun.confirm = null; if (st.view === 'intraday') { renderIConfirm(); renderIDetail(); } }          // 只有確認用得到 5 分 K: 掃描保留,確認結果作廢
+      toast(`已載入${interval === '60m' ? ' 60 分 K' : ' 5 分 K'}: ${file.name}`);
+    } catch (err) { st.intraError = `${file.name}: ${err.message}`; }
+    st.intraLoading = ''; renderData();
+  }
+
+  const INTRA_ROLES = [
+    { id: '60m', title: '60 分 K 檔', example: 'cache/sp500_60m.npz', aria: '上傳 60 分 K npz', use: '選擇(前半 I1)與確認(後半 I2)' },
+    { id: '5m', title: '5 分 K 檔', example: 'cache/sp500_5m.npz', aria: '上傳 5 分 K npz', use: '只在確認階段用' },
+  ];
+
+  function intraStatus(info) {
+    if (!info) return '尚未載入';
+    if (info.error) return info.error;
+    const base = `${info.bars} 根/天 · 檔內 ${info.fileDays.toLocaleString('en-US')} 個交易日 · ${info.tickers} 檔`;
+    if (!info.aligned) return `${base} · 載入日線資料後才會對齊`;
+    return `${info.days.toLocaleString('en-US')} 個交易日可用(${info.firstUsed} ~ ${info.lastUsed}${info.skipped ? `;${info.skipped} 天不在日線日曆上,已略過` : ''}) · ${info.bars} 根/天 · ${info.matched} / ${info.tickers} 檔對上日線面板`;
+  }
+
+  function intradayBlock() {
+    return h('div', { class: 'stack', style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+      h('div', { class: 'sect-title' }, '盤中 K 線(選用: 解開限價成交與停利的先後)'),
+      h('p', { class: 'hint' }, '日線分不出同一天裡「限價單成交」和「停利」誰先發生。載入研究程式的盤中檔(build_intraday 的輸出)後,可以改用盤中 K 棒驗證: 60 分 K 的前半選規則,後半與 5 分 K 只在確認時才看。標的的順序要和日線面板相同。'),
+      ...INTRA_ROLES.map((r) => h('div', { class: 'stack', style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+        h('label', { class: 'field' }, `${r.title}(例如 ${r.example};${r.use})`,
+          h('input', { type: 'file', accept: '.npz', 'aria-label': r.aria, onChange: (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) loadIntradayFile(f, r.id); } })),
+        h('div', { class: st.intra[r.id]?.error ? 'field-error' : 'hint', 'data-testid': `dt-intra-${r.id}` },
+          st.intraLoading === r.id ? '載入中…' : intraStatus(st.intra[r.id])))),
+      st.intraError ? h('div', { class: 'errors', role: 'alert' }, st.intraError) : null);
+  }
+
   function renderData() {
     clear(dataMount);
     const seg = h('div', { class: 'seg', role: 'group', 'aria-label': '資料來源' },
@@ -166,6 +215,7 @@ export function createDayTrade({ panelMount, resultsMount, getAssets, getBars, t
       if (dropped.length) body.push(h('div', { class: 'notice' }, `${dropped.map(([id, n]) => `${id}(${n} 根)`).join('、')} 的 K 棒不在共同交易日曆上(例如週末),已略過。`));
       body.push(h('div', { class: 'status', 'data-testid': 'dt-info' }, h('strong', null, `${st.info.tickers} 檔 · ${st.info.days.toLocaleString('en-US')} 個交易日`), ` · ${st.info.first} ~ ${st.info.last} · 外部序列: ${st.info.aux.length ? st.info.aux.join('、') : '無'}`));
     }
+    body.push(intradayBlock());
     dataMount.append(h('div', { class: 'stack', style: { display: 'flex', flexDirection: 'column', gap: '10px' } }, ...body));
   }
 
@@ -271,6 +321,7 @@ export function createDayTrade({ panelMount, resultsMount, getAssets, getBars, t
       h('div', { class: 'sect-title' }, '驗收標準(先寫定,事後不調整)'),
       h('div', { class: 'row wrap' }, n('winPct', 'D1 勝率 >(%)', 'winPct', { min: 0, max: 100 }), n('meanPct', 'D2 平均報酬 ≥(%)', 'meanPct', { step: 0.1 }), n('sharePct', 'D3 個股達標比例 >(%)', 'sharePct', { min: 0, max: 100 })),
       h('div', { class: 'row wrap' }, n('devMin', '個股最少筆數(開發集)', 'devMin', { min: 1 }), n('holdMin', '個股最少筆數(holdout)', 'holdMin', { min: 1 })),
+      h('div', { class: 'row wrap' }, n('intraMin', '個股最少筆數(盤中 60 分 K 的 I1 / I2)', 'intraMin', { min: 1 })),
       h('div', { class: 'sect-title' }, '資料切分'),
       labelled('Holdout 起始日(這天以前 = 開發集;掃描只用開發集)', field('splitDate', h('input', { type: 'date', value: s.splitDate, 'aria-label': 'holdout 起始日', onChange: (e) => { s.splitDate = e.target.value; persist(); } }))),
       h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.optimistic, onChange: (e) => { s.optimistic = e.target.checked; persist(); } }), '同時算「樂觀上界」(限價 + 停利的規則;多花約一倍時間)'),
@@ -279,7 +330,10 @@ export function createDayTrade({ panelMount, resultsMount, getAssets, getBars, t
 
   // ---- 執行 ----
 
-  function renderRunLabel() { if (runBtn) runBtn.textContent = st.running ? '計算中…' : (st.mode === 'single' ? '執行規則' : '執行網格掃描'); }
+  function renderRunLabel() {
+    if (runBtn) runBtn.textContent = st.running ? '計算中…' : (st.mode === 'single' ? '執行規則' : '執行網格掃描');
+    if (runIntraBtn) { runIntraBtn.textContent = st.running ? '計算中…' : '盤中驗證'; runIntraBtn.disabled = st.running; }
+  }
 
   const thresholds = () => ({ winThreshold: st.settings.winPct / 100, meanThreshold: st.settings.meanPct / 100, passShare: st.settings.sharePct / 100, eligShare: DEFAULTS.eligShare });
 
@@ -326,7 +380,7 @@ export function createDayTrade({ panelMount, resultsMount, getAssets, getBars, t
     if (!compiled.ok) { renderMessage('error', `規則有 ${compiled.errors.length} 個問題,請先修正。第一個: ${compiled.errors[0].field} — ${compiled.errors[0].message}`); return; }
     const s = st.settings;
     if (!s.splitDate) { renderMessage('error', '請設定 holdout 起始日。'); return; }
-    st.running = true; runBtn.disabled = true; renderRunLabel();
+    st.running = true; runBtn.disabled = true; st.view = 'daily'; renderRunLabel();
     const progress = h('progress', { max: 1, value: 0, style: { width: '100%' } });
     const label = h('p', { class: 'status', role: 'status' }, '準備中…');
     clear(resultsMount); resultsMount.append(h('section', { class: 'card' }, h('h2', { style: { fontSize: '15px', marginBottom: '8px' } }, st.mode === 'single' ? '計算中' : '掃描中'), label, progress));
@@ -356,18 +410,25 @@ export function createDayTrade({ panelMount, resultsMount, getAssets, getBars, t
     resultsMount.append(h('div', { class: 'empty' },
       h('h2', null, '當沖規則掃描'),
       h('p', null, '每個「標的 × 交易日」是一筆獨立的當日進出交易。這裡看的是逐筆統計: 勝率、平均每筆淨報酬,以及多少比例的個股各自都達標。'),
-      h('ol', null, h('li', null, '載入資料: 內建標的、你的 .npz 面板(例如 sp500_daily.npz)或多個 CSV'), h('li', null, '寫一條規則,或載入 588 條標準網格'), h('li', null, '設定驗收標準與 holdout 起始日,按「執行」')),
+      h('ol', null, h('li', null, '載入資料: 內建標的、你的 .npz 面板(例如 sp500_daily.npz)或多個 CSV'), h('li', null, '寫一條規則,或載入 588 條標準網格'), h('li', null, '設定驗收標準與 holdout 起始日,按「執行」'), h('li', null, '(選用)載入 60 分 K / 5 分 K 檔,按「盤中驗證」: 用盤中 K 棒解開限價成交與停利的先後')),
       h('p', { class: 'hint', style: { marginTop: '14px' } }, '掃描只用開發集;holdout 要自己明確按下按鈕才會揭曉,並且會記錄看過幾次。')));
   }
 
   const studyKey = () => `${hash(`${st.info.tickers}|${st.info.first}|${st.info.last}|${st.info.days}`)}|${hash(JSON.stringify(run.cfg.grid))}|${run.cfg.splitDate}`;
-  const peeks = () => (read(PEEKS) || {})[studyKey()] || { total: 0, byKey: {} };
-  function addPeek(key) {
-    const all = read(PEEKS) || {}, k = studyKey(), p = all[k] || { total: 0, byKey: {} };
+  // 盤中: 同一份日線、同一份 60 分 K(日期範圍)、同一組規則的 I2 與 5 分 K,算同一個「樣本外」
+  const intraStudyKey = () => {
+    const a = st.intra['60m'], b = st.intra['5m'];
+    return `intra|${hash(`${st.info.tickers}|${st.info.first}|${st.info.last}|${st.info.days}`)}|${hash(JSON.stringify(irun.cfg.grid))}|${a.firstUsed}|${a.lastUsed}|${a.days}|${b?.firstUsed}|${b?.lastUsed}|${b?.days}`;
+  };
+  const peeksFor = (k) => (read(PEEKS) || {})[k] || { total: 0, byKey: {} };
+  function addPeekFor(k, key) {
+    const all = read(PEEKS) || {}, p = all[k] || { total: 0, byKey: {} };
     p.total++; p.byKey[key] = (p.byKey[key] || 0) + 1; all[k] = p;
     write(PEEKS, all);
     return p;
   }
+  const peeks = () => peeksFor(studyKey());
+  const addPeek = (key) => addPeekFor(studyKey(), key);
   const peeksText = (key) => { const p = peeks(); return p.total ? `這份資料與規則組合的 holdout 已經被查看 ${p.total} 次(這條規則 ${p.byKey[key] || 0} 次)。每多看一次,它的證據力就再打折。` : 'Holdout 還沒有被查看過。它是留給「最後驗證」用的:看過之後再依結果調整規則,就不再是沒看過的資料。'; };
 
   async function select(key, { scroll = true } = {}) {
@@ -432,6 +493,11 @@ export function createDayTrade({ panelMount, resultsMount, getAssets, getBars, t
   }
 
   function renderResults() {
+    if (st.view === 'intraday' && irun) { renderIntradayResults(); return; }
+    renderDailyResults();
+  }
+
+  function renderDailyResults() {
     regions = {}; detailRegion = null;
     if (!run) { renderEmpty(); return; }
     clear(resultsMount);
@@ -460,15 +526,139 @@ export function createDayTrade({ panelMount, resultsMount, getAssets, getBars, t
     renderDetail();
   }
 
+  // ---- 盤中驗證 ----
+
+  let iregions = {};
+
+  async function executeIntraday() {
+    if (st.running) return;
+    if (!st.info) { st.view = 'daily'; renderMessage('error', '請先在左邊載入日線資料(內建標的、.npz 面板或 CSV)。'); return; }
+    const a = st.intra['60m'];
+    if (!a) { st.view = 'daily'; renderMessage('error', '請先在「資料」區塊載入 60 分 K 檔(研究程式 build_intraday 的輸出)。'); return; }
+    if (a.error) { st.view = 'daily'; renderMessage('error', a.error); return; }
+    const eg = effectiveGrid();
+    if (eg.error) { renderMessage('error', eg.error); return; }
+    const compiled = compileGrid(eg.grid);
+    showRuleErrors(compiled.errors);
+    if (!compiled.ok) { renderMessage('error', `規則有 ${compiled.errors.length} 個問題,請先修正。第一個: ${compiled.errors[0].field} — ${compiled.errors[0].message}`); return; }
+    st.running = true; runBtn.disabled = true; renderRunLabel();
+    const progress = h('progress', { max: 1, value: 0, style: { width: '100%' } });
+    const label = h('p', { class: 'status', role: 'status' }, '準備中…');
+    clear(resultsMount); resultsMount.append(h('section', { class: 'card' }, h('h2', { style: { fontSize: '15px', marginBottom: '8px' } }, '盤中掃描中(只用 I1)'), label, progress));
+    try {
+      const missing = await ensureAux(compiled.compiled);
+      const cfg = { grid: eg.grid, thresholds: thresholds(), minTrades: st.settings.intraMin };
+      const t0 = performance.now();
+      const scan = await runner.call('scanIntraday', cfg, { onProgress: (d, t) => { progress.value = d / t; label.textContent = `處理標的 ${d} / ${t}(${((performance.now() - t0) / 1000).toFixed(0)} 秒)`; } });
+      irun = { cfg, scan, selected: null, confirm: null, confirming: false, progress: null, missing, seconds: (performance.now() - t0) / 1000, view: { minPlotN: 30, showOpt: true, filter: '', side: 'all', onlyElig: true, sortBy: 'mean', sortDir: 'desc', limit: 150, liveLimit: 30 } };
+      st.view = 'intraday';
+      renderResults();
+    } catch (err) { renderMessage('error', err.message || String(err)); } finally {
+      st.running = false; runBtn.disabled = false; renderRunLabel();
+    }
+  }
+
+  const intraThresholds = () => ({ ...DEFAULTS, ...irun.cfg.thresholds });
+  const ipeeksText = () => {
+    const p = peeksFor(intraStudyKey());
+    return p.total ? `這份資料與規則組合的 I2 與 5 分 K 已經被查看 ${p.total} 次。每多看一次,它的證據力就再打折。` : 'I2 與 5 分 K 還沒有被查看過。它們是留給最後確認用的:看過之後再依結果調整規則,就不再是沒看過的資料。';
+  };
+  const confirmKeyList = () => confirmKeys(irun.scan.live, irun.scan.candidates);
+
+  function selectI(key, { scroll = true } = {}) {
+    if (!irun) return;
+    irun.selected = key;
+    renderIDetail();
+    if (scroll) iregions.detail?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  async function revealConfirm() {
+    if (!irun || irun.confirming) return;
+    const p = peeksFor(intraStudyKey());
+    const msg = p.total
+      ? `這份資料與規則組合的 I2 與 5 分 K 已經看過 ${p.total} 次。\n每多看一次,證據力就再打折。仍要看嗎?`
+      : 'I2 與 5 分 K 是留給最後確認的資料。\n看了之後,如果再依結果調整規則,它們就不再是沒看過的資料。\n\n確定現在要看嗎?';
+    if (!confirm(msg)) return;
+    const mine = irun;
+    mine.confirming = true; mine.progress = h('progress', { max: 1, value: 0, style: { width: '100%' } });
+    renderIConfirm();
+    try {
+      const out = await runner.call('confirmIntraday', { ...mine.cfg, live: mine.scan.live, candidates: mine.scan.candidates },
+        { onProgress: (d, t) => { mine.progress.value = d / t; } });
+      addPeekFor(intraStudyKey(), 'confirm');
+      mine.confirm = out;
+    } catch (err) { toast(`確認階段失敗: ${err.message}`); }
+    mine.confirming = false; mine.progress = null;
+    if (mine === irun && st.view === 'intraday') { renderIConfirm(); renderIDetail(); }
+  }
+
+  function renderIDetail() {
+    if (!iregions.detail) return;
+    clear(iregions.detail);
+    if (!irun?.selected) return;
+    const row = irun.scan.rules.find((r) => r.key === irun.selected);
+    iregions.detail.append(intradayDetailCard(row, irun.confirm?.rules.find((r) => r.key === row.key) || null, intraThresholds(), {
+      live: irun.scan.live.includes(row.key), onClose: () => { irun.selected = null; renderIDetail(); },
+    }));
+  }
+
+  function renderIConfirm() {
+    if (!iregions.confirm) return;
+    clear(iregions.confirm);
+    const keys = confirmKeyList(), five = st.intra['5m'];
+    const whyNot = !keys.length ? '存活候選與候選都是空的,沒有可以確認的規則。' : (!five ? '確認階段還需要 5 分 K 檔 — 請在「資料」區塊載入。' : (five.error || ''));
+    iregions.confirm.append(confirmCard(irun.scan, irun.confirm, intraThresholds(), {
+      keys, peeksText: ipeeksText(), canConfirm: !whyNot && !irun.confirming, whyNot, progress: irun.progress, selected: irun.selected,
+      onConfirm: revealConfirm, onSelect: selectI,
+      onCsv: () => download(`${safeFilename(irun.cfg.grid.name, 'scan')}-confirm.csv`, confirmCsv(irun.scan, irun.confirm, intraThresholds()), 'text/csv'),
+    }));
+  }
+
+  function renderIRules({ keepFocus = false } = {}) {
+    if (!iregions.rules) return;
+    clear(iregions.rules);
+    iregions.rules.append(rulesCard(irun.scan, intraThresholds(), irun.view, { onSelect: selectI, selected: irun.selected, rerender: (o) => renderIRules(o || {}) }));
+    if (keepFocus) { const i = iregions.rules.querySelector('input[aria-label="篩選規則"]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
+  }
+
+  function renderILive() {
+    clear(iregions.live);
+    iregions.live.append(liveCard(irun.scan, intraThresholds(), irun.view, { onSelect: selectI, selected: irun.selected, rerender: renderILive }));
+  }
+
+  function renderIntradayResults() {
+    iregions = {};
+    clear(resultsMount);
+    const { scan, cfg } = irun, t = intraThresholds();
+    resultsMount.append(
+      h('div', { class: 'status', 'data-testid': 'dt-istatus' },
+        h('strong', null, `盤中驗證: ${cfg.grid.name}`), ` · ${scan.tickers} 檔 × ${scan.rules.length} 條規則 · I1 ${scan.dev.first} → ${scan.dev.last}(${scan.dev.days.toLocaleString('en-US')} 個交易日)· ${irun.seconds.toFixed(1)} 秒 · I2(${scan.i2.first} → ${scan.i2.last})與 5 分 K 未被使用`),
+      h('div', { class: 'notice' }, h('ul', null,
+        ...(irun.missing.length ? [h('li', null, `找不到外部序列 ${irun.missing.join('、')} 的資料,用到它的條件不會觸發。`)] : []),
+        h('li', null, '條件、限價距離、停利幅度仍然用日線(開盤決策框架)判斷;成交與停利的先後用 60 分 K 的每一根高低點決定。保守算法:成交之後的下一根 K 棒起,碰到停利才算;樂觀算法:成交的那一根也算。'),
+        h('li', null, '這一頁只用 I1(60 分 K 的前半)。I2 與 5 分 K 要在「確認」自己按按鈕才會揭曉,並且會記錄看過幾次。'),
+        h('li', null, '股票池若是「今天」的成分股,會有存活者偏誤(下市、被剔除的公司不在樣本內),對逢低買進類規則有利。'))));
+    for (const k of ['summary', 'live', 'cands', 'detail', 'confirm', 'scatter', 'frontier', 'rules']) { iregions[k] = h('div'); resultsMount.append(iregions[k]); }
+    iregions.summary.append(summaryCard(scan, t, { illusion: ILLUSION, title: '掃描結果(I1)' }));
+    renderILive();
+    iregions.cands.append(candidatesCard(scan, t, { onSelect: selectI, selected: irun.selected }));
+    iregions.scatter.append(scatterCard(scan, t, irun.view, { onSelect: selectI, selected: irun.selected }));
+    iregions.frontier.append(frontierCard(scan, t, { onSelect: selectI }));
+    renderIConfirm(); renderIDetail(); renderIRules();
+    resultsMount.append(h('div', null, h('button', { type: 'button', class: 'ghost', onClick: () => download(`${safeFilename(cfg.grid.name, 'scan')}-I1.csv`, csvOf(scan), 'text/csv') }, '下載全部規則的 I1 結果(CSV)')));
+  }
+
   // ---- 組裝 ----
 
   dataMount = h('div'); ruleMount = h('div'); settingsMount = h('div');
   runBtn = h('button', { type: 'button', class: 'primary', id: 'dt-run', onClick: execute }, '執行規則');
-  panelMount.append(section('資料', dataMount), section('規則', ruleMount), section('成交與驗收', settingsMount), h('div', { class: 'run-bar' }, runBtn));
+  runIntraBtn = h('button', { type: 'button', id: 'dt-run-intra', title: '用盤中 K 棒驗證(需要先載入 60 分 K 檔)', onClick: executeIntraday }, '盤中驗證');
+  panelMount.append(section('資料', dataMount), section('規則', ruleMount), section('成交與驗收', settingsMount), h('div', { class: 'run-bar' }, runBtn, runIntraBtn));
   renderData(); renderRule(); renderSettings(); renderRunLabel(); renderEmpty();
 
   return {
     run: execute,
+    runIntraday: executeIntraday,
     /** 資料清單(內建標的)載入完成後呼叫,讓選單更新並預設選取 */
     refreshAssets() {
       const ids = assetsForPicker().map((a) => a.id);

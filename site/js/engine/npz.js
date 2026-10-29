@@ -143,3 +143,28 @@ export async function panelFromNpz(buffer) {
   if (z.vix && z.vix.data.length === n) panel.aux['^VIX'] = Float64Array.from(z.vix.data);
   return panel;
 }
+
+/**
+ * 盤中 K 線檔(研究程式 build_intraday() 的輸出,例如 cache/sp500_60m.npz、sp500_5m.npz)。
+ * 期待欄位: dates (日,)、H / L (日, 第幾根, 檔)、O / C (日, 檔),選用 tickers (檔,)。
+ * H / L 是每根 K 棒的高低,O / C 是當天的開盤(第一根的開)與收盤(最後一根的收);缺值是 NaN。
+ * 他的檔案沒有存代號,檔的順序要和日線面板一樣;有 tickers 欄位時改用代號對齊。
+ */
+export async function intradayFromNpz(buffer) {
+  const z = await readNpz(buffer);
+  const missing = ['dates', 'H', 'L', 'O', 'C'].filter((k) => !z[k]);
+  if (missing.length) throw new Error(`.npz 缺少陣列: ${missing.join('、')}(盤中檔需要 dates、H、L、O、C)`);
+  const dates = z.dates.data, n = dates.length;
+  const { shape } = z.H;
+  if (shape.length !== 3 || shape[0] !== n) throw new Error(`H 的形狀應該是 (${n}, 第幾根, 檔數),實際是 (${shape.join(', ')})`);
+  const nb = shape[1], m = shape[2];
+  if (nb < 1 || m < 1) throw new Error('H 的形狀不正確(沒有 K 棒或沒有標的)');
+  if (z.L.shape.join() !== shape.join()) throw new Error(`L 的形狀 (${z.L.shape.join(', ')}) 與 H (${shape.join(', ')}) 不同`);
+  for (const k of ['O', 'C']) {
+    const sh = z[k].shape;
+    if (sh.length !== 2 || sh[0] !== n || sh[1] !== m) throw new Error(`${k} 的形狀應該是 (${n}, ${m}),實際是 (${sh.join(', ')})`);
+  }
+  if (z.tickers && z.tickers.data.length !== m) throw new Error(`tickers 有 ${z.tickers.data.length} 檔,但 H 有 ${m} 檔`);
+  for (let i = 1; i < n; i++) if (!(dates[i] > dates[i - 1])) throw new Error(`dates 必須由舊到新、不可重複(第 ${i + 1} 筆 ${dates[i]})`);
+  return { dates, nb, m, H: z.H.data, L: z.L.data, O: z.O.data, C: z.C.data, tickers: z.tickers ? z.tickers.data : null };
+}

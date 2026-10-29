@@ -129,6 +129,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .seg button[aria-pressed="true"] { background: var(--s1); color: #fff; font-weight: 600; }
 .run-bar { display: flex; gap: 8px; align-items: center; }
 .run-bar .primary { flex: 1; height: 40px; font-size: 15px; }
+.run-bar button:not(.primary) { height: 40px; }
 
 .errors { background: color-mix(in srgb, var(--bad) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent); border-radius: 8px; padding: 8px 12px; color: var(--ink); }
 .errors ul { margin: 4px 0 0; padding-left: 18px; }

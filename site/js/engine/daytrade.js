@@ -339,7 +339,7 @@ export function makeTickerContext(compiled, panel, k) {
 // ---- 模擬一檔標的、一條規則 -------------------------------------------------------------
 
 /** 條件成立且資料可用的日子(索引)。 */
-function eligibleDays(ctx, setupSeries) {
+export function eligibleDays(ctx, setupSeries) {
   const idx = [];
   for (let i = 0; i < ctx.n; i++) if (ctx.ok[i] && ctx.valid[i] && setupSeries[i] === setupSeries[i] && setupSeries[i] !== 0) idx.push(i);
   return Int32Array.from(idx);
@@ -420,9 +420,9 @@ class Accumulator {
   }
 }
 
-/** rows 是布林陣列(哪些日子納入)或 { name, rows, minTrades } 的清單,轉成 每日的時段編號。 */
-function segmentIndex(panel, segments) {
-  const seg = new Uint8Array(panel.dates.length).fill(SEG_NONE);
+/** segments 是 { name, rows, minTrades } 的清單(rows = 布林陣列,哪些日子納入),轉成 每日的時段編號。 */
+function segmentIndex(nDays, segments) {
+  const seg = new Uint8Array(nDays).fill(SEG_NONE);
   segments.forEach((s, si) => {
     for (let i = 0; i < seg.length; i++) if (s.rows[i] && seg[i] === SEG_NONE) seg[i] = si;
   });
@@ -441,6 +441,18 @@ export const VARIANTS = {
   cost2x: { id: 'cost2x', optimistic: false, costMultiplier: 2 },
 };
 
+/** 日線模式: 一天一筆交易,日期軸就是面板的日曆。盤中模式(intraday.js)提供同樣形狀的 mode。 */
+function dailyMode(panel) {
+  return {
+    nDays: panel.dates.length,
+    forTicker: (k, ctx) => ({
+      days: (rows) => rows,
+      series: (s) => s,
+      simulate: (days, dist, tp, side, opts, sink) => simulateDays(ctx.px, days, dist, tp, side, opts, sink),
+    }),
+  };
+}
+
 /**
  * 評估一批規則。逐檔標的處理(DSL 運算式每檔只算一次、不同規則共用),結果依 規則 × 變體 × 時段 累加。
  *
@@ -452,13 +464,23 @@ export const VARIANTS = {
  */
 export function evaluateRules(panel, compiled, cfg, onProgress = () => {}) {
   validatePanel(panel);
+  return runRules(panel, compiled, cfg, dailyMode(panel), onProgress);
+}
+
+/**
+ * evaluateRules 的核心,日線與盤中共用。mode = { nDays, forTicker(k, ctx) }:
+ *   nDays        統計用的日期軸長度(segments 的 rows 就是這條軸上的布林陣列)
+ *   forTicker    回傳這一檔的 { days(日線列索引 → 這條軸上的日子), series(日線序列 → 這條軸上的序列), simulate(days, dist, tp, side, opts, sink) };
+ *                回傳 null = 這一檔沒有資料可用,跳過(仍計入「個股」的分母)
+ */
+export function runRules(panel, compiled, cfg, mode, onProgress = () => {}) {
   const segments = cfg.segments, variants = (cfg.variants || ['cons']).map((v) => (typeof v === 'string' ? VARIANTS[v] : v));
-  const seg = segmentIndex(panel, segments);
+  const seg = segmentIndex(mode.nDays, segments);
   const all = expandRules(compiled);
   const wanted = cfg.ruleKeys ? new Set(cfg.ruleKeys) : null;
   const rules = wanted ? all.filter((r) => wanted.has(r.key)) : all;
-  const m = panel.tickers.length, nDays = panel.dates.length;
-  const accOpts = { median: Boolean(cfg.median), nDays: cfg.daily ? nDays : 0 };
+  const m = panel.tickers.length;
+  const accOpts = { median: Boolean(cfg.median), nDays: cfg.daily ? mode.nDays : 0 };
   const baseCost = compiled.costBps / 1e4, buffer = compiled.bufferBps / 1e4;
 
   // 樂觀算法只在「限價進場 + 停利」時和保守算法不同,其他規則直接共用保守的結果
@@ -468,18 +490,21 @@ export function evaluateRules(panel, compiled, cfg, onProgress = () => {}) {
   const usedSetups = [...new Set(rules.map((r) => r.si))], usedEntries = [...new Set(rules.map((r) => r.ei))], usedExits = [...new Set(rules.map((r) => r.xi))];
   for (let k = 0; k < m; k++) {
     const ctx = makeTickerContext(compiled, panel, k);
-    const days = new Map(usedSetups.map((si) => [si, compiled.setups[si].ast ? eligibleDays(ctx, ctx.evalSeries(compiled.setups[si].ast)) : new Int32Array(0)]));
-    const dist = new Map(usedEntries.map((ei) => [ei, compiled.entries[ei].expr.trim() ? ctx.evalSeries(compiled.entries[ei].ast) : null]));
-    const tp = new Map(usedExits.map((xi) => [xi, compiled.exits[xi].expr.trim() ? ctx.evalSeries(compiled.exits[xi].ast) : null]));
-    rules.forEach((r, ri) => {
-      variants.forEach((v, vi) => {
-        const set = accs[ri][vi];
-        if (!set) return;
-        simulateDays(ctx.px, days.get(r.si), dist.get(r.ei), tp.get(r.xi), r.side,
-          { optimistic: v.optimistic, cost: baseCost * v.costMultiplier, buffer },
-          (day, ret) => { const s = seg[day]; if (s !== SEG_NONE) set[s].add(k, day, ret); });
+    const run = mode.forTicker(k, ctx);
+    if (run) {
+      const days = new Map(usedSetups.map((si) => [si, run.days(compiled.setups[si].ast ? eligibleDays(ctx, ctx.evalSeries(compiled.setups[si].ast)) : new Int32Array(0))]));
+      const dist = new Map(usedEntries.map((ei) => [ei, compiled.entries[ei].expr.trim() ? run.series(ctx.evalSeries(compiled.entries[ei].ast)) : null]));
+      const tp = new Map(usedExits.map((xi) => [xi, compiled.exits[xi].expr.trim() ? run.series(ctx.evalSeries(compiled.exits[xi].ast)) : null]));
+      rules.forEach((r, ri) => {
+        variants.forEach((v, vi) => {
+          const set = accs[ri][vi];
+          if (!set) return;
+          run.simulate(days.get(r.si), dist.get(r.ei), tp.get(r.xi), r.side,
+            { optimistic: v.optimistic, cost: baseCost * v.costMultiplier, buffer },
+            (day, ret) => { const s = seg[day]; if (s !== SEG_NONE) set[s].add(k, day, ret); });
+        });
       });
-    });
+    }
     onProgress(k + 1, m);
   }
 
