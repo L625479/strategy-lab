@@ -30,6 +30,9 @@ jobs:
         run: python tools/live_dump_python.py /tmp/py.json SPY AAPL ^GSPC BTC-USD 2330.TW CL=F EURUSD=X ^VIX GOOG
       - name: Node 版對照 + 真的 /api
         run: node tools/live_check.mjs /tmp/py.json
+      - name: 診斷 Yahoo 搜尋對中文的回應
+        if: always()
+        run: node tools/probe_search.mjs
 
   browser:
     runs-on: ubuntu-latest

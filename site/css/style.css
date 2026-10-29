@@ -248,3 +248,5 @@ button.link code { color: var(--s1); }
 @media (max-width: 640px) { .topbar { flex-wrap: wrap; } .topbar .tabs { order: 3; width: 100%; margin: 0; } }
 .card-head .row input[type="text"] { width: 220px; }
 .card-head .row select { width: auto; }
+.net-row .nm:nth-child(2) { flex: 1; text-align: left; }
+.net-row .nm:last-child { flex: none; color: var(--s1); }

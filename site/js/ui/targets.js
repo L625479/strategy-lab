@@ -106,11 +106,11 @@ export function createTargets(mount, {
     const sym = q.toUpperCase();
     const have = (id) => Boolean(byId(id));
     const rows = [];
-    const row = (symbol, name, extra) => h('div', { class: 'pick-row' },
+    const row = (symbol, name, extra) => h('div', { class: 'pick-row net-row' },
       h('button', { type: 'button', 'aria-label': `下載 ${symbol}`, disabled: Boolean(net.busy), onClick: () => download(symbol) },
         h('span', { class: 'sym' }, symbol), h('span', { class: 'nm' }, [name, extra].filter(Boolean).join(' · ')), h('span', { class: 'nm' }, net.busy === symbol ? '下載中…' : '下載')));
-    if (SYMBOL_RE.test(sym) && !have(sym) && !net.results.some((r) => r.symbol === sym)) rows.push(row(sym, '直接用這個代號(按 Enter 也可以)', ''));
     for (const r of net.results) if (!have(r.symbol)) rows.push(row(r.symbol, r.name, [r.exchange, r.type].filter(Boolean).join(' ')));
+    if (SYMBOL_RE.test(sym) && !have(sym) && !net.results.some((r) => r.symbol === sym)) rows.push(row(sym, '直接用這個代號(按 Enter 也可以)', ''));
     const box = h('div', { class: 'picker', 'aria-label': '網路搜尋結果', 'data-testid': 'net-results' }, h('div', { class: 'group' }, '從網路找(Yahoo Finance)'), ...rows);
     if (net.loading) box.append(h('p', { class: 'hint', style: { padding: '4px 10px' } }, '搜尋中…'));
     else if (net.error) box.append(h('p', { class: 'field-error', style: { padding: '4px 10px' } }, net.error));

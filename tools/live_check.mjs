@@ -16,25 +16,48 @@ let failed = false, unreachable = 0;
 const check = (ok, label, detail = '') => { results.push(`${ok ? 'OK  ' : 'FAIL'} ${label}${detail ? `  ${detail}` : ''}`); if (!ok) failed = true; };
 
 // ---- 1. Node 版 vs Python 版 ----
+// (a) 同一份 Yahoo 原始回應(Python 抓的)丟給兩邊清理: 序列與判定必須「完全」相同 → 驗證清理程式碼
+// (b) 兩邊各自獨立向 Yahoo 抓一次: Yahoo 兩次回應的數字本身可能差一點點(浮點雜訊),所以比對日期、成交量,價格容許最後一位有效數字的差異,並印出差多少
+const REL_TOL = 1.5e-5;
+const rel = (a, b) => Math.abs(a - b) / Math.max(Math.abs(a), Math.abs(b), 1e-12);
 for (const [symbol, want] of Object.entries(py)) {
   if (want.fetch_error) { results.push(`SKIP ${symbol}: Python 版抓取失敗(${want.fetch_error})`); unreachable++; continue; }
-  let parsed;
-  try { parsed = parseChart(await fetchChart(symbol, 26, new Date())); } catch (e) {
+  // (a)
+  const parsedA = parseChart(want.raw);
+  const { series: sa, stats: ta } = buildSeries(parsedA, want.today_local);
+  const va = verdict(sa, ta, want.today_local);
+  const sameA = JSON.stringify(sa) === JSON.stringify(want.series);
+  let detailA = `n=${ta.n} ${sa.d[0]} ~ ${sa.d.at(-1)} 修正=${ta.repaired} 空值=${ta.null} 過期比=${(ta.stale_share * 100).toFixed(1)}%`;
+  if (!sameA) {
+    const i = sa.d.findIndex((d, k) => d !== want.series.d[k] || ['o', 'h', 'l', 'c', 'v'].some((c) => sa[c][k] !== want.series[c][k]));
+    detailA += `  首個差異在第 ${i} 筆: JS ${JSON.stringify(['d', 'o', 'h', 'l', 'c', 'v'].map((c) => sa[c][i]))} vs Python ${JSON.stringify(['d', 'o', 'h', 'l', 'c', 'v'].map((c) => want.series[c][i]))}`;
+  }
+  check(sameA, `${symbol}: 同一份原始回應,JS 與 Python 清理後的序列完全相同`, detailA);
+  check(va.ok === want.ok && va.warn === want.warn && va.reason === want.reason, `${symbol}: 同一份原始回應,品質判定相同`, `ok=${va.ok} warn=${JSON.stringify(va.warn)} reason=${JSON.stringify(va.reason)}`);
+
+  // (b)
+  let rawB;
+  try { rawB = await fetchChart(symbol, 26, new Date()); } catch (e) {
     if (e instanceof FetchError) { results.push(`SKIP ${symbol}: JS 版抓取失敗(${e.message})`); unreachable++; continue; }
     throw e;
   }
-  const today = new Date(Date.now() + parsed.offset * 1000).toISOString().slice(0, 10);
-  const { series, stats } = buildSeries(parsed, today);
-  const v = verdict(series, stats, today);
-  const same = JSON.stringify(series) === JSON.stringify(want.series);
-  let detail = `n=${stats.n} ${series.d[0]} ~ ${series.d.at(-1)} 修正=${stats.repaired} 空值=${stats.null} 過期比=${(stats.stale_share * 100).toFixed(1)}%`;
-  if (!same) {
-    const a = series, b = want.series;
-    const i = a.d.findIndex((d, k) => d !== b.d[k] || ['o', 'h', 'l', 'c', 'v'].some((c) => a[c][k] !== b[c][k]));
-    detail += `  首個差異在第 ${i} 筆: JS ${JSON.stringify(['d', 'o', 'h', 'l', 'c', 'v'].map((c) => a[c][i]))} vs Python ${JSON.stringify(['d', 'o', 'h', 'l', 'c', 'v'].map((c) => b[c][i]))}(長度 ${a.d.length} vs ${b.d.length})`;
+  const rq = want.raw.chart.result[0], bq = rawB.chart.result[0];
+  const rawDiff = {};
+  for (const [name, get] of [['open', (r) => r.indicators.quote[0].open], ['high', (r) => r.indicators.quote[0].high], ['low', (r) => r.indicators.quote[0].low], ['close', (r) => r.indicators.quote[0].close], ['adjclose', (r) => r.indicators.adjclose?.[0]?.adjclose]]) {
+    const x = get(rq), y = get(bq);
+    if (!x || !y || x.length !== y.length) { rawDiff[name] = 'length'; continue; }
+    let n = 0, mx = 0;
+    x.forEach((v, i) => { if (v !== y[i]) { n++; if (v != null && y[i] != null) mx = Math.max(mx, rel(v, y[i])); } });
+    rawDiff[name] = `${n}處 最大相對差 ${mx.toExponential(1)}`;
   }
-  check(same, `${symbol}: JS 與 Python 清理後的序列逐筆相同`, detail);
-  check(v.ok === want.ok && v.warn === want.warn && v.reason === want.reason, `${symbol}: 品質判定相同`, `ok=${v.ok} warn=${JSON.stringify(v.warn)} reason=${JSON.stringify(v.reason)}`);
+  results.push(`INFO ${symbol}: 兩次獨立下載的「原始回應」差異(個數/最大相對差): ${JSON.stringify(rawDiff)};時間戳${JSON.stringify(rq.timestamp) === JSON.stringify(bq.timestamp) ? '相同' : '不同'}`);
+  const parsedB = parseChart(rawB);
+  const todayB = new Date(Date.now() + parsedB.offset * 1000).toISOString().slice(0, 10);
+  const { series: sb } = buildSeries(parsedB, todayB);
+  const sameDates = JSON.stringify(sb.d) === JSON.stringify(want.series.d);
+  let n = 0, mx = 0;
+  if (sameDates) for (let i = 0; i < sb.d.length; i++) for (const c of ['o', 'h', 'l', 'c']) { if (sb[c][i] !== want.series[c][i]) { n++; mx = Math.max(mx, rel(sb[c][i], want.series[c][i])); } }
+  check(sameDates && JSON.stringify(sb.v) === JSON.stringify(want.series.v) && mx <= REL_TOL, `${symbol}: 兩次獨立下載清理後,日期與成交量相同、價格差不超過 ${REL_TOL}`, `價格有 ${n} 個數字不同,最大相對差 ${mx.toExponential(2)}(共 ${sb.d.length * 4} 個)`);
 }
 
 // ---- 2. 真正的伺服器 ----
@@ -55,7 +78,8 @@ try {
   if (p.status !== 200) { results.push(`SKIP /api/prices AAPL: HTTP ${p.status} ${JSON.stringify(p.body)}`); unreachable++; }
   else {
     const direct = await loadSymbol('AAPL');
-    check(p.body.symbol === 'AAPL' && p.body.d.length === direct.d.length && JSON.stringify(p.body.c) === JSON.stringify(direct.c), '/api/prices?symbol=aapl 與 loadSymbol 相同', `n=${p.body.d.length} name=${JSON.stringify(p.body.name)} ${p.body.exchange} ${p.body.currency} 最後一根=${p.body.d.at(-1)}`);
+    const mxc = direct.c.reduce((m, v, i) => Math.max(m, rel(v, p.body.c[i])), 0);
+    check(p.body.symbol === 'AAPL' && JSON.stringify(p.body.d) === JSON.stringify(direct.d) && mxc <= REL_TOL, '/api/prices?symbol=aapl 與 loadSymbol 相同(日期相同、收盤價差不超過容許值)', `n=${p.body.d.length} name=${JSON.stringify(p.body.name)} ${p.body.exchange} ${p.body.currency} 最後一根=${p.body.d.at(-1)} 收盤價最大相對差 ${mxc.toExponential(2)}`);
     check(p.body.adjusted === true && /Yahoo/.test(p.body.source), '回應標示調整後價格與來源');
   }
   const nf = await api('/api/prices?symbol=ZZZZNOTREAL');

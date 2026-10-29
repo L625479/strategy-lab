@@ -28,7 +28,8 @@ ok(true, '網站偵測到本機伺服器的 /api,搜尋框顯示「輸入代號�
 
 // 名稱搜尋 → 點結果下載 → 回測
 await search.fill('apple');
-await page.waitForSelector('[data-testid=net-results] button[aria-label^="下載 "]', { timeout: 20000 });
+await page.waitForSelector('[data-testid=net-results] button[aria-label="下載 AAPL"]', { timeout: 20000 });
+await page.waitForFunction(() => !/搜尋中/.test(document.querySelector('[data-testid=net-results]')?.textContent || ''), null, { timeout: 20000 });
 const found = await page.$$eval('[data-testid=net-results] button', (bs) => bs.map((b) => b.textContent));
 lines.push(`INFO 搜尋「apple」: ${JSON.stringify(found)}`);
 ok(found.some((t) => /^AAPL/.test(t)), '搜尋「apple」找得到 AAPL');

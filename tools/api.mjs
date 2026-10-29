@@ -65,8 +65,10 @@ export function createApi({ fetchImpl = fetch, now = () => new Date(), sleep = (
       // eslint-disable-next-line no-control-regex
       if (!q || q.length > 60 || /[\u0000-\u001f\u007f]/.test(q)) { send(res, 400, { error: '搜尋文字不能是空的,也不能超過 60 個字' }); return true; }
       try { send(res, 200, await cached(`s|${q.toLowerCase()}`, searchTtlMs, () => searchSymbols(q, { fetchImpl }))); } catch (err) {
-        const [status, message] = explain(err, q);
-        send(res, status === 404 ? 502 : status, { error: message });
+        const [status, message] = err instanceof FetchError
+          ? (err.status === 429 ? [503, 'Yahoo 暫時限流(請求太頻繁),等一兩分鐘再試。'] : [502, `搜尋失敗: ${err.message}。可以直接輸入代號(例如 2330.TW)再按 Enter。`])
+          : [502, `連不上 Yahoo Finance: ${err?.message || err}`];
+        send(res, status, { error: message });
       }
       return true;
     }

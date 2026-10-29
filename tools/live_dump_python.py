@@ -16,11 +16,12 @@ out, symbols = sys.argv[1], sys.argv[2:]
 session, now, dump = requests.Session(), datetime.now(timezone.utc), {}
 for sym in symbols:
     try:
-        parsed = fp.parse_chart(fp.fetch_chart(session, sym, 26, now))
+        raw = fp.fetch_chart(session, sym, 26, now)
+        parsed = fp.parse_chart(raw)
         today_local = datetime.fromtimestamp(now.timestamp() + parsed["offset"], tz=timezone.utc).strftime("%Y-%m-%d")
         series, stats = fp.build_series(parsed, today_local)
         ok, warn, reason = fp.verdict(series, stats, today_local)
-        dump[sym] = {"series": series, "stats": stats, "ok": ok, "warn": warn, "reason": reason}
+        dump[sym] = {"raw": raw, "today_local": today_local, "series": series, "stats": stats, "ok": ok, "warn": warn, "reason": reason}
         print(f"{sym}: n={stats['n']} ok={ok} {series['d'][0]}~{series['d'][-1]}")
     except Exception as e:  # noqa: BLE001
         dump[sym] = {"fetch_error": str(e)}
