@@ -1,0 +1,28 @@
+name: probe-sources
+
+# 臨時: 看哪些公開的資料來源從 GitHub 的 runner 連得到(用來挑獨立的交叉驗證來源)。確認後會刪除。
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe
+        run: |
+          UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+          probe() { echo "=== $1"; curl -sS -m 40 -A "$UA" -w '\n[HTTP %{http_code} %{content_type} %{size_download} bytes]\n' "$2" | head -c "${3:-400}"; echo; }
+          probe "CBOE VIX history" "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv" 300
+          probe "FRED VIXCLS" "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS&cosd=2026-10-01" 300
+          probe "FRED SP500" "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2026-10-01" 300
+          probe "FRED DTB3" "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DTB3&cosd=2026-10-01" 300
+          probe "Nasdaq SPY" "https://api.nasdaq.com/api/quote/SPY/historical?assetclass=etf&fromdate=2026-10-01&limit=5&todate=2026-10-28" 500
+          probe "Nasdaq AAPL" "https://api.nasdaq.com/api/quote/AAPL/historical?assetclass=stocks&fromdate=2026-10-01&limit=5&todate=2026-10-28" 500
+          probe "Stooq spy.us" "https://stooq.com/q/d/l/?s=spy.us&i=d" 200
+          probe "Stooq .pl" "https://stooq.pl/q/d/l/?s=spy.us&i=d" 200
+          probe "Treasury par yield" "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv" 300
+          probe "Yahoo chart (reference)" "https://query1.finance.yahoo.com/v8/finance/chart/SPY?range=5d&interval=1d" 200
