@@ -276,7 +276,9 @@ test('完整流程: 起始日與結束日、基準、暖機期、缺資料的提
   assert.equal(r.bench.id, 'q'); assert.equal(r.bench.equity.length, 151);
   near(r.bench.equity[150] / 1000, qqq.c[250] / qqq.o[100]);
   near(r.buyHold[150] / 1000, spy.c[250] / spy.o[100]);
-  assert.equal(r.run.fills[0].idx, 100, '起始日開盤依前一天收盤的訊號買進(暖機期 50 根已過)');
+  assert.equal(r.run.fills.length, 0, '預設 carryIn: 部位從暖機期後就持有,起始日之後沒有新的成交');
+  const flat = runWeights(c, data, { capital: 1000, start: spy.d[100], end: spy.d[250], carryIn: false });
+  assert.equal(flat.run.fills[0].idx, 100, 'carryIn: false → 起始日開盤依前一天收盤的訊號買進(暖機期 50 根已過)');
   assert.throws(() => runWeights(c, data, { start: '2100-01-01' }), /沒有資料/);
   assert.throws(() => buildWeightsData(c, { SPY: spy }), /找不到 QQQ/);
 });
@@ -302,4 +304,28 @@ test('規則語法的新函式: sqrt / log / exp / sign / pow / clip / ifelse / 
   assert.ok(Number.isNaN(E('ifelse(ret(x) > 0, 1, 2)')[0]) === false, '比較式遇到 NaN 為假 → 走 else');
   assert.ok(Number.isNaN(E('ifelse(ret(x), 1, 2)')[0]), '條件本身是 NaN → 結果 NaN');
   assert.ok(Number.isNaN(E('sqrt(0 - x)')[0]) && Number.isNaN(E('avg(x, ret(x))')[0]));
+});
+
+test('carryIn(預設): 策略從資料開頭跑,績效從起始日起算;等於完整結果的一段,金額換算成起始時有本金', () => {
+  const spy = randomWalk(500, 41, 0.015);
+  const c = compileWeights(strat({
+    indicators: [{ name: 'vol', expr: 'std(ret(close), 20)' }], rates: { mode: 'constant', series: '', constantPct: 3 },
+    weights: [{ series: 'px', expr: 'clip(0.01 / vol, 0, 2)' }], band: 5,
+  })).compiled;
+  const data = buildWeightsData(c, data1(spy));
+  const whole = runWeights(c, data, { capital: 1000 });
+  const t0 = 300;
+  const carry = runWeights(c, data, { capital: 1000, start: spy.d[t0] });
+  assert.equal(carry.dates[0], spy.d[t0]); assert.equal(carry.dates.length, 500 - t0);
+  const scale = 1000 / whole.equity[t0 - 1];
+  for (const k of [0, 1, 50, 199]) near(carry.equity[k], whole.equity[t0 + k] * scale, 1e-10);
+  assert.ok(carry.run.fills.every((f) => f.idx >= t0) && carry.run.fills.length > 5);
+  near(carry.run.totals.costs, carry.run.tradeCost.reduce((a, b) => a + b, 0));
+  near(carry.account.fills, carry.run.fills.length);
+  // 重新開始(carryIn: false)從起始日空手,結果不同
+  const flat = runWeights(c, data, { capital: 1000, start: spy.d[t0], carryIn: false });
+  assert.notDeepEqual([...flat.equity.slice(0, 5)], [...carry.equity.slice(0, 5)]);
+  assert.equal(flat.run.fills[0].idx, t0);
+  // 起始日是第一根時,兩種做法完全一樣
+  assert.deepEqual([...runWeights(c, data, { capital: 1000, carryIn: false }).equity], [...whole.equity]);
 });

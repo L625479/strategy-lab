@@ -278,4 +278,4 @@ export function renderError(mount, message) {
   mount.append(h('div', { class: 'errors', role: 'alert' }, h('strong', null, '無法執行回測'), h('p', null, message)));
 }
 
-export { withAlpha };
+export { withAlpha, card, kpi, deltaLine, monthlyCard, legendKey };

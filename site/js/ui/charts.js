@@ -122,6 +122,26 @@ export function drawdownChart(container, { dates, strategy, buyHold }, t = readT
   return { chart };
 }
 
+/** 曝險(倍數): 總曝險(多單 + 空單的絕對值,占淨值)與淨曝險;虛線是 1 倍。 */
+export function exposureChart(container, { dates, gross, net }, t = readTheme()) {
+  const fmt = (v) => `${v.toFixed(2)}×`;
+  const chart = LW().createChart(container, { ...baseOptions(t), localization: { priceFormatter: fmt } });
+  const area = chart.addSeries(LW().AreaSeries, {
+    lineColor: t.s[0], lineWidth: 2, topColor: withAlpha(t.s[0], 0.14), bottomColor: withAlpha(t.s[0], 0.02), priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 4,
+  });
+  area.setData(dates.map((d, i) => ({ time: d, value: gross[i] })));
+  area.createPriceLine({ price: 1, color: t.muted, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '1×' });
+  const rows = [{ series: area, label: '總曝險', color: t.s[0], format: fmt }];
+  if (net.some((v, i) => Math.abs(v - gross[i]) > 1e-9)) {
+    const line = chart.addSeries(LW().LineSeries, { color: t.muted, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 4 });
+    line.setData(dates.map((d, i) => ({ time: d, value: net[i] })));
+    rows.push({ series: line, label: '淨曝險', color: t.muted, format: fmt });
+  }
+  chart.timeScale().fitContent();
+  attachTooltip(container, chart, rows, (time) => String(time));
+  return { chart };
+}
+
 const REASON = { signal: '訊號', stop_loss: '止損', take_profit: '止盈' };
 export const reasonLabel = (r) => REASON[r] || r;
 

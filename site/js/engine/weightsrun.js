@@ -16,6 +16,24 @@
 import { daysBetween, drawdownSeries, equityMetrics, monthlyReturns } from './metrics.js';
 import { evaluateWeights, rateSeries } from './weights.js';
 
+const sumOf = (a) => { let t = 0; for (const x of a) t += x; return t; };
+const totalsOf = (r) => ({ interest: sumOf(r.interest), financing: sumOf(r.financing), borrowFee: sumOf(r.borrowFee), costs: sumOf(r.tradeCost), notional: r.fills.reduce((a, f) => a + f.notional, 0) });
+
+/** 把一次從資料開頭跑完的結果切成「從 offset 起」的一段,並把金額換算成「這段期間開始時有 capital」的比例 */
+function sliceRun(r, offset, scale) {
+  const cut = (a, mul = 1) => (mul === 1 ? a.slice(offset) : a.slice(offset).map((x) => x * mul));
+  const out = {
+    dates: r.dates.slice(offset), equity: cut(r.equity, scale), gross: cut(r.gross), net: cut(r.net), borrowed: cut(r.borrowed),
+    exposure: r.exposure.map((a) => cut(a)), shares: r.shares.map((a) => cut(a, scale)),
+    accrual: cut(r.accrual, scale), interest: cut(r.interest, scale), financing: cut(r.financing, scale), borrowFee: cut(r.borrowFee, scale), tradeCost: cut(r.tradeCost, scale),
+    startIdx: r.startIdx + offset,
+    fills: r.fills.filter((f) => f.idx >= r.startIdx + offset).map((f) => ({ ...f, shares: f.shares * scale, notional: f.notional * scale, cost: f.cost * scale })),
+    ruined: r.ruined, totals: null,
+  };
+  out.totals = totalsOf(out);
+  return out;
+}
+
 const clampTargets = (raw, { allowShort, maxGross }) => {
   const t = raw.map((x) => (Number.isFinite(x) ? (allowShort ? x : Math.max(0, x)) : 0));
   const gross = t.reduce((a, x) => a + Math.abs(x), 0);
@@ -34,10 +52,10 @@ export function runTargetWeights({ dates, tradables, weights, rate, capital, sta
   const n = endIdx - startIdx + 1, m = tradables.length;
   const cost = sideBps / 1e4, fee = borrowFeePct / 100, spread = spreadPct / 100;
   const out = {
-    dates: dates.slice(startIdx, endIdx + 1), equity: new Float64Array(n), gross: new Float64Array(n), net: new Float64Array(n), borrowed: new Float64Array(n),
+    startIdx, dates: dates.slice(startIdx, endIdx + 1), equity: new Float64Array(n), gross: new Float64Array(n), net: new Float64Array(n), borrowed: new Float64Array(n),
     exposure: tradables.map(() => new Float64Array(n)), shares: tradables.map(() => new Float64Array(n)),
-    accrual: new Float64Array(n), tradeCost: new Float64Array(n), fills: [],
-    totals: { interest: 0, financing: 0, borrowFee: 0, costs: 0, notional: 0 }, ruined: false,
+    accrual: new Float64Array(n), interest: new Float64Array(n), financing: new Float64Array(n), borrowFee: new Float64Array(n), tradeCost: new Float64Array(n), fills: [],
+    totals: null, ruined: false,
   };
 
   let cash = capital, ruined = false;
@@ -52,7 +70,7 @@ export function runTargetWeights({ dates, tradables, weights, rate, capital, sta
       const interest = Math.max(0, Eprev - Lprev) * r * dt, financing = Math.max(0, Lprev - Eprev) * (r + spread) * dt, borrowFee = Sprev * fee * dt;
       cash += interest - financing - borrowFee;
       out.accrual[k] = interest - financing - borrowFee;
-      out.totals.interest += interest; out.totals.financing += financing; out.totals.borrowFee += borrowFee;
+      out.interest[k] = interest; out.financing[k] = financing; out.borrowFee[k] = borrowFee;
     }
 
     // 2) 開盤: 依前一天收盤的目標權重調整
@@ -75,7 +93,7 @@ export function runTargetWeights({ dates, tradables, weights, rate, capital, sta
           const notional = Math.abs(delta) * o, c = notional * cost;
           cash -= delta * o + c;
           sh[j] = newShares;
-          out.tradeCost[k] += c; out.totals.costs += c; out.totals.notional += notional;
+          out.tradeCost[k] += c;
           out.fills.push({ idx: i, date: dates[i], series: tradables[j].name, shares: delta, price: o, notional, cost: c, fromWeight: cur, toWeight: target[j] });
         }
       }
@@ -101,6 +119,7 @@ export function runTargetWeights({ dates, tradables, weights, rate, capital, sta
     for (let j = 0; j < m; j++) out.shares[j][k] = sh[j];
     Eprev = E; Lprev = L; Sprev = S;
   }
+  out.totals = totalsOf(out);
   return out;
 }
 
@@ -124,9 +143,11 @@ function buyAndHold(arrs, startIdx, endIdx, capital) {
 /**
  * 完整流程: 對齊資料 → 求目標權重 → 帳戶模擬 → 績效。
  * @param compiled compileWeights().compiled   @param data buildWeightsData() 的結果
- * @param opts { capital, start, end, benchmark: 序列名稱 | '' }
+ * @param opts { capital, start, end, benchmark: 序列名稱 | '', carryIn }
+ *   carryIn(預設 true): 策略從資料開頭就開始跑,只是績效從 start 起算(部位延續下來,和「凍結規則在 holdout 期間的表現」同一個意思);
+ *   false: 從 start 當天空手開始(指標仍用 start 之前的歷史預熱)。
  */
-export function runWeights(compiled, data, { capital = 100000, start = '', end = '', benchmark = '' } = {}) {
+export function runWeights(compiled, data, { capital = 100000, start = '', end = '', benchmark = '', carryIn = true } = {}) {
   const s = compiled.strategy;
   const { weights } = evaluateWeights(compiled, data);
   const warm = s.warmupBars;
@@ -134,10 +155,16 @@ export function runWeights(compiled, data, { capital = 100000, start = '', end =
   const rate = rateSeries(compiled, data);
   const startIdx = firstIdxOnOrAfter(data.dates, start), endIdx = lastIdxOnOrBefore(data.dates, end);
   if (startIdx < 0 || endIdx < startIdx) throw new Error('所選期間內沒有資料');
-  const run = runTargetWeights({
-    dates: data.dates, tradables: data.tradables, weights, rate, capital, startIdx, endIdx,
+  const runStart = carryIn ? 0 : startIdx;
+  const full = runTargetWeights({
+    dates: data.dates, tradables: data.tradables, weights, rate, capital, startIdx: runStart, endIdx,
     band: s.band / 100, maxGross: s.maxGross, allowShort: s.allowShort, sideBps: s.costs.sideBps, borrowFeePct: s.costs.borrowFeePct, spreadPct: s.costs.financingSpreadPct,
   });
+  let run = full;
+  if (runStart < startIdx) {
+    const before = full.equity[startIdx - runStart - 1];
+    run = sliceRun(full, startIdx - runStart, before > 0 ? capital / before : 1);
+  }
   const dates = run.dates;
   const prim = data.series[compiled.primary];
   const buyHold = buyAndHold(prim, startIdx, endIdx, capital);

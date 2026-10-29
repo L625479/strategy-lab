@@ -34,17 +34,14 @@ for (const c of CASES) {
   if (!compiled.ok) { console.log(`${c.title}: 編譯失敗`, compiled.errors); continue; }
   const data = buildWeightsData(compiled.compiled, Object.fromEntries(strategy.series.map((s) => [s.ticker, bars(s.ticker)])));
   console.log(`\n== ${c.title}  ${c.start} → ${c.end}`);
-  // 做法 A: 從 holdout 起始日空手開始(指標用起始日之前的歷史預熱)
+  // 預設做法(筆記的慣例): 策略從資料開頭就在跑,績效只取該期間(部位延續下來)
   const a = runWeights(compiled.compiled, data, { capital: 100000, start: c.start, end: c.end, benchmark: 'bench' });
-  console.log(line('這裡: 策略(從起始日空手開始)', a.metrics));
+  console.log(line('這裡: 策略(從資料開頭跑、取該期間)', a.metrics));
   console.log(line(`這裡: ${c.ticker} 買進持有`, a.buyHoldMetrics));
   if (a.benchMetrics) console.log(line('這裡: SPY 買進持有', a.benchMetrics));
   console.log(`  平均曝險 ${a.account.avgGross.toFixed(2)} 倍,${pct(a.account.shareLevered, 0)} 的日子使用融資,成交 ${a.account.fills} 筆,融資利息 ${a.account.financing.toFixed(0)}、現金利息 ${a.account.interest.toFixed(0)}、成本 ${a.account.costs.toFixed(0)}`);
-  // 做法 B: 從資料開頭一路跑,只取 holdout 期間的績效(部位是延續下來的)
-  const full = runWeights(compiled.compiled, data, { capital: 100000, end: c.end });
-  const i0 = full.dates.findIndex((d) => d >= c.start);
-  const slice = Float64Array.from(full.equity.slice(i0));
-  const { equityMetrics } = await import('../site/js/engine/metrics.js');
-  console.log(line('這裡: 策略(從資料開頭跑、取該期間)', equityMetrics(full.dates.slice(i0), slice, slice[0])));
+  // 對照做法: 從起始日當天空手開始
+  const flat = runWeights(compiled.compiled, data, { capital: 100000, start: c.start, end: c.end, carryIn: false });
+  console.log(line('這裡: 策略(從起始日空手開始)', flat.metrics));
   for (const n of c.notes) console.log(note(...n));
 }

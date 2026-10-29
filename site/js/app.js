@@ -26,6 +26,7 @@ $('#theme').addEventListener('click', () => {
   const next = cur === 'dark' ? 'light' : 'dark';
   applyTheme(next); saveTheme(next);
   if (lastCtx) draw(lastCtx); // 圖表的顏色在建立時讀取,換主題要重畫
+  weightsApp?.redraw();
 });
 
 // ---- 小提示 -------------------------------------------------------------------
@@ -148,16 +149,22 @@ runBtn.addEventListener('click', run);
 // 離開或切到背景時立刻存檔(去抖動的存檔可能還沒執行)
 addEventListener('pagehide', () => persist.flush());
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') persist.flush(); });
-document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); if (TABS.dt[1].hidden) run(); else dayTrade?.run(); } });
+document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); if (!TABS.bt[1].hidden) run(); else if (!TABS.w[1].hidden) weightsApp?.run(); else dayTrade?.run(); } });
 
 // ---- 分頁: 策略回測 / 當沖掃描(當沖頁在第一次開啟時才載入) -------------------------------
 
-let dayTrade = null;
-const TABS = { bt: [$('#tab-bt'), $('#app-bt')], dt: [$('#tab-dt'), $('#app-dt')] };
+let dayTrade = null, weightsApp = null;
+const TABS = { bt: [$('#tab-bt'), $('#app-bt')], w: [$('#tab-w'), $('#app-w')], dt: [$('#tab-dt'), $('#app-dt')] };
 
 async function showTab(name) {
   for (const [key, [btn, main]] of Object.entries(TABS)) { btn.setAttribute('aria-selected', String(key === name)); main.hidden = key !== name; }
   try { localStorage.setItem('lab.tab', name); } catch { /* 瀏覽器封鎖儲存空間時,下次還是從預設分頁開始 */ }
+  if (name === 'w' && !weightsApp) {
+    try {
+      const { createWeights } = await import('./ui/weights.js');
+      weightsApp = createWeights({ panelMount: $('#panel-w'), resultsMount: $('#results-w'), getAssets: () => targets.list(), getBars, toast });
+    } catch (err) { $('#results-w').replaceChildren(h('div', { class: 'errors', role: 'alert' }, `目標權重分頁載入失敗: ${err.message}`)); }
+  } else if (name === 'w') weightsApp?.refreshAssets();     // 在回測分頁上傳了新的 CSV 之後,這裡的選單要跟著更新
   if (name === 'dt' && !dayTrade) {
     try {
       const { createDayTrade } = await import('./ui/daytrade.js');
@@ -199,8 +206,8 @@ async function boot() {
   renderEmpty(resultsMount, targets.hasAssets());
   if (targets.get().items.length) run();
   let tab = 'bt';
-  try { tab = localStorage.getItem('lab.tab') === 'dt' ? 'dt' : 'bt'; } catch { /* 同上 */ }
-  if (tab === 'dt') showTab('dt');
+  try { const t = localStorage.getItem('lab.tab'); tab = t === 'dt' || t === 'w' ? t : 'bt'; } catch { /* 同上 */ }
+  if (tab !== 'bt') showTab(tab);
 }
 
 boot();

@@ -40,6 +40,7 @@ export const ASSETS = [
   { id: 'GLD', name: 'SPDR Gold(合成測試資料)', category: '商品', cfg: { seed: 13, n: 2000, start: '2018-01-02', base: 120, vol: 0.009, drift: 0.0002 } },
   { id: 'TLT', name: 'iShares 20Y Treasury(合成測試資料)', category: '債券', cfg: { seed: 14, n: 1500, start: '2020-01-02', base: 130, vol: 0.008, drift: -0.0001 } },
   { id: 'BTC-USD', name: 'Bitcoin(合成測試資料)', category: '加密貨幣', cfg: { seed: 15, n: 2800, start: '2018-01-01', base: 10000, vol: 0.035, drift: 0.0012, weekdaysOnly: false } },
+  { id: '^IRX', name: '13 週國庫券利率(合成測試資料)', category: '指數', cfg: { seed: 17, n: 2000, start: '2018-01-02', base: 4, vol: 0.004, drift: 0 } },
   { id: '^VIX', name: 'VIX 波動率指數(合成測試資料)', category: '指數', cfg: { seed: 16, n: 2000, start: '2018-01-02', base: 20, vol: 0.06, drift: 0 } },
 ];
 
