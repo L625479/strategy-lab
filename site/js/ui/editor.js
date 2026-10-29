@@ -139,7 +139,7 @@ export function createEditor(mount, { onChange = () => {}, onShare = () => {}, p
           : textInput(`python.params.${p.name}`, String(value), set));
       }),
       h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.python.checkLookahead, 'aria-label': '檢查偷看未來', onChange: (e) => { s.python.checkLookahead = e.target.checked; changed(); } }),
-        '檢查策略有沒有偷看未來資料(把資料截短重跑 3 次,前面的訊號若被後面的資料改變就警告;建議保持開啟)'),
+        '檢查策略有沒有偷看未來資料(把資料截短、最多多跑 7 次;前面的訊號若被後面的資料改變就警告,建議保持開啟)'),
       h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: s.allowShort, onChange: (e) => { s.allowShort = e.target.checked; changed(); } }), '允許做空(策略回傳 -1 或 entry_short 時才會放空)'),
       h('p', { class: 'hint' }, '把用 Python 寫的策略放進 strategies_py/ 資料夾(範本: _template.py),存檔後按「重新整理」。約定與範例見 README「用 Python 寫策略」。手續費、滑價、投入比例、止損止盈照樣在下面設定;策略只負責「什麼時候進出」。'),
     ];
