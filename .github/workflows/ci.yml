@@ -3,9 +3,8 @@ name: ci
 # 單元測試(引擎、資料管線、部署設定)。瀏覽器端對端測試需要 Chromium,在自己的電腦跑(見 README)。
 on:
   push:
-    branches: [main]
+    branches: [main, "claude/**"]
   pull_request: {}
-  workflow_dispatch: {}
 
 permissions:
   contents: read
